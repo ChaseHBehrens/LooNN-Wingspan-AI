@@ -90,3 +90,18 @@ impl From<Vec<Action>> for Triggers {
         triggers
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rodent_gain_trigger_does_not_match_fish() {
+        let mut triggers = Triggers::new();
+        triggers += Triggers::from(vec![Action::InitialGainFood(Food::Rodent)]);
+        assert_eq!(triggers.gain_food.wilds, 0);
+        assert!(triggers.gain_food.contains(Food::Rodent.into()));
+        assert!(!triggers.gain_food.contains(Food::Fish.into()));
+    }
+}

@@ -114,7 +114,7 @@ impl Add for FoodCollection {
             fish: self.fish.saturating_add(rhs.fish),
             fruits: self.fruits.saturating_add(rhs.fruits),
             rodents: self.rodents.saturating_add(rhs.rodents),
-            wilds: self.rodents.saturating_add(rhs.wilds),
+            wilds: self.wilds.saturating_add(rhs.wilds),
         }
     }
 }
@@ -217,3 +217,19 @@ impl Cost {
     }
 }
 
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_keeps_wilds_separate_from_rodents() {
+        let a = FoodCollection { rodents: 2, wilds: 1, ..FoodCollection::new() };
+        let b = FoodCollection { fish: 1, wilds: 3, ..FoodCollection::new() };
+        let sum = a + b;
+        assert_eq!(sum, FoodCollection {
+            fish: 1, rodents: 2, wilds: 4, ..FoodCollection::new()
+        });
+    }
+}
