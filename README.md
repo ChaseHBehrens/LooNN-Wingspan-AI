@@ -20,14 +20,14 @@ Download the **[latest release](https://github.com/ChaseHBehrens/LooNN-Wingspan-
 
 </div>
 
-## About 
+## About
+
 // TODO: Wingspan game explanation
 
 
 // TODO: about network
-
 Claude Opus 5.5 was used to generate code in X areas of the project
-- 
+
 
 ## Performance
 // TODO: diagram from training
