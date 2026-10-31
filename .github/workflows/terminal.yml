@@ -1,18 +1,32 @@
 # Builds the terminal version (src/bin/terminal.rs) for Linux, macOS and Windows
-# and attaches the downloads to the release. Run by hand, it keeps the builds as
+# when a version tag (v*) is pushed, and attaches the downloads to that tag's
+# release, creating the release if needed. Run by hand, it keeps the builds as
 # workflow artifacts instead.
 name: Build terminal version
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  release:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+
   build:
+    needs: release
+    # Still runs when started by hand, which skips the release job
+    if: ${{ !failure() && !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -60,13 +74,13 @@ jobs:
           fi
 
       - name: Attach to the release
-        if: github.event_name == 'release'
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" "${{ steps.package.outputs.file }}" --clobber
+        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.package.outputs.file }}" --clobber
 
       - name: Keep as a workflow artifact
-        if: github.event_name != 'release'
+        if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
           name: loonn-terminal-${{ matrix.name }}

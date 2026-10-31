@@ -1,10 +1,11 @@
-# Publishes the standalone play page to GitHub Pages whenever a release is published.
-# One-time setup: Settings > Pages > Build and deployment > Source: GitHub Actions.
+# Publishes the standalone play page to GitHub Pages whenever a version tag (v*) is pushed.
+# One-time setup: Settings > Pages > Build and deployment > Source: GitHub Actions,
+# and Settings > Environments > github-pages > Deployment branches and tags: add the tag rule v*.
 name: Deploy play page
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
