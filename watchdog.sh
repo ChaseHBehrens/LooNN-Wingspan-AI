@@ -16,7 +16,8 @@ cd "$(dirname "$0")"
 
 PARALLEL_GAMES="${1:-}"
 EVAL_EVERY=3600       # seconds between progress checks
-EVAL_GAMES=30         # full test games per progress check (~3 minutes)
+EVAL_GAMES=30         # full test games per progress check (~20 minutes alongside training)
+EVAL_TIMEOUT=2400     # seconds before a progress check's test is cut off
 MAX_FAST_CRASHES=5    # give up after this many crashes in a row...
 FAST_CRASH_SECONDS=300 # ...that each happen within this long of starting
 
@@ -52,8 +53,9 @@ progress() {
     average=$(tail -n 200 "$scores" 2>/dev/null | grep -v '^game' \
         | awk -F, '{ s += $2; n++ } END { if (n) printf "%.1f", s / n; else print "-" }')
     exploration=$(grep -o 'exploration [0-9.]*' logs/train.log 2>/dev/null | tail -n 1 | cut -d' ' -f2)
-    # Plays against the latest saved checkpoint while training continues
-    result=$(./target/release/test full "$EVAL_GAMES" 2>&1 | tr '\r' '\n' \
+    # Plays against the latest saved checkpoint while training continues; the
+    # timeout keeps a stuck test from stalling crash monitoring
+    result=$(timeout "$EVAL_TIMEOUT" ./target/release/test full "$EVAL_GAMES" 2>&1 | tr '\r' '\n' \
         | grep -E 'averaged' | awk '{ printf "%s %s  ", $1, $3 }')
     disk=$(df -h . | awk 'NR == 2 { print $4 }')
     printf '%s  player-games %s  avg(last 200) %s  exploration %s  test(%s games): %s disk free %s\n' \

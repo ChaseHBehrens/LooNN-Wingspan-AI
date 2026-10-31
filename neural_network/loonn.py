@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import os
 import shutil
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,6 +13,10 @@ _CHECKPOINT_PATH = _HERE / "model_hand_attn.pt"
 # Snapshots of the model taken during training
 _SNAPSHOT_DIR = _HERE.parent / "saved_models"
 _SNAPSHOT_EVERY = 2000  # player-games (one per player per game), roughly hourly
+# Player-games between checkpoint saves. Saving after every one rewrote ~9 MB each
+# time (terabytes over a long run); a crash now loses at most this many updates.
+# _SNAPSHOT_EVERY must be a multiple of this.
+_SAVE_EVERY = 20
 
 # Replay data: fixed-size ring buffers, so disk use stays bounded. Boards are
 # stored as float16. Hands are stored as indices into a table of unique card
@@ -23,19 +28,39 @@ _TARGETS_PATH = _HERE / "targets.bin"
 _CARDS_PATH = _HERE / "cards.npy"
 _META_PATH = _HERE / "replay_meta.json"
 
-_ARCH = "hand_attn_v2"
+_ARCH = "hand_attn_v3"
+# The replay buffer stores raw board and card vectors, which v3 still uses
+_REPLAY_ARCH = "hand_attn_v2"
 _BOARD_DIM = 1713
 _CARD_DIM = 108
 _MAX_HAND = 32
 
+# Layout of the vectors built in src/evaluators/loonn.rs
+_SLOT_DIM = 1 + _CARD_DIM + 2  # occupied, bird, eggs / 6, room for eggs / 6
+_SUPPLY_START = 15 * _SLOT_DIM  # 5 food counts / 15
+_CARD_COST_ALL = slice(0, 6)  # 5 foods then wild, each count / 2
+_CARD_COST_ONE_OF = slice(6, 11)  # flags for the 5 foods
+_CARD_HABITATS = slice(15, 18)  # forest, grassland, wetland
+_EGGS_TO_PLAY = [0, 1, 1, 2, 2]  # by birds already in the habitat
+
+# Computed from the board and each card, so the network does not have to learn
+# to compare costs with the food supply: affordable, food short / 2, whether
+# gaining each food gets closer to affording it, can be placed in each habitat,
+# playable now
+_RELATION_DIM = 11
+# Over the hand: cards each food gets closer to affording, playable cards,
+# affordable cards (each / 5)
+_DEMAND_DIM = 7
+
 _CARD_D = 64
 _CARD_HEADS = 4
 _CARD_LAYERS = 2
-_POOL_QUERIES = 2
+_POOL_QUERIES = 4
 _BOARD_D = 256
 _SCORE_SCALE = 50.0
 
-_LEARNING_RATE = 3e-4
+# Halved from 3e-4 at ~79k player-games, once progress slowed to ~1 point per 10k
+_LEARNING_RATE = 1.5e-4
 # Each position is seen 2x when new, then sampled REPLAY_SAMPLE_SIZE / REPLAY_CAPACITY
 # of the time per player-game while it stays in the replay buffer
 _EPOCHS_PER_GAME = 1
@@ -63,17 +88,68 @@ _card_table: np.ndarray
 _card_ids: dict[bytes, int]
 
 
+def relations(board: torch.Tensor, cards: torch.Tensor, pad: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-card features relating each card to the board, [B, N, RELATION_DIM], and
+    the hand's food demand, [B, DEMAND_DIM]. Mirrors the rules in src/core/player.rs
+    (playable_birds_in_habitat), which ignore paying 2 foods as a wild."""
+    with torch.no_grad():
+        batch = board.shape[0]
+        supply = torch.round(board[:, _SUPPLY_START : _SUPPLY_START + 5] * 15)
+        slots = board[:, : _SUPPLY_START].reshape(batch, 3, 5, _SLOT_DIM)
+        birds_in_habitat = torch.round(slots[..., 0]).sum(-1)
+        eggs = torch.round(slots[..., 1 + _CARD_DIM] * 6).sum((1, 2))
+
+        cost = torch.round(cards[..., _CARD_COST_ALL] * 2)
+        one_of = cards[..., _CARD_COST_ONE_OF] > 0.5
+        is_one_of = one_of.any(-1)
+
+        food = supply.unsqueeze(1)
+        missing = cost[..., :5] > food
+        deficit = (cost[..., :5] - food).clamp(min=0).sum(-1)
+        surplus = (food - cost[..., :5]).clamp(min=0).sum(-1)
+        wild_short = (cost[..., 5] - surplus).clamp(min=0)
+        one_of_short = ~(one_of & (food > 0)).any(-1)
+        short = torch.where(is_one_of, one_of_short.float(), deficit + wild_short)
+        affordable = short == 0
+        # Gaining a food the cost needs fills a deficit; any other food adds to
+        # the surplus, which helps only if a wild is still unpaid
+        closer = torch.where(
+            is_one_of.unsqueeze(-1),
+            one_of & one_of_short.unsqueeze(-1),
+            missing | (wild_short > 0).unsqueeze(-1),
+        )
+        eggs_needed = torch.tensor(_EGGS_TO_PLAY + [0], dtype=eggs.dtype, device=board.device)
+        open_habitat = (birds_in_habitat < 5) & (eggs_needed[birds_in_habitat.long()] <= eggs.unsqueeze(1))
+        placeable = (cards[..., _CARD_HABITATS] > 0.5) & open_habitat.unsqueeze(1)
+        playable = affordable & placeable.any(-1)
+
+        rel = torch.cat([
+            affordable.unsqueeze(-1).float(),
+            (short / 2).unsqueeze(-1),
+            closer.float(),
+            placeable.float(),
+            playable.unsqueeze(-1).float(),
+        ], -1)
+        in_hand = (~pad).float()
+        demand = torch.cat([
+            (closer.float() * in_hand.unsqueeze(-1)).sum(1),
+            (playable.float() * in_hand).sum(1, keepdim=True),
+            (affordable.float() * in_hand).sum(1, keepdim=True),
+        ], -1) / 5
+        return rel * in_hand.unsqueeze(-1), demand
+
+
 class LooNNModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.board_net = nn.Sequential(
-            nn.Linear(_BOARD_DIM, _BOARD_D),
+            nn.Linear(_BOARD_DIM + _DEMAND_DIM, _BOARD_D),
             nn.GELU(),
             nn.Linear(_BOARD_D, _BOARD_D),
             nn.GELU(),
         )
         self.card_embed = nn.Sequential(
-            nn.Linear(_CARD_DIM, _CARD_D),
+            nn.Linear(_CARD_DIM + _RELATION_DIM, _CARD_D),
             nn.GELU(),
             nn.Linear(_CARD_D, _CARD_D),
         )
@@ -107,7 +183,7 @@ class LooNNModel(nn.Module):
         )
 
     def hand_vector(self, b: torch.Tensor, cards: torch.Tensor, pad: torch.Tensor) -> torch.Tensor:
-        """cards: [B, N, CARD_DIM], pad: [B, N] (True = padding) -> [B, Q * CARD_D]"""
+        """cards: [B, N, CARD_DIM + RELATION_DIM], pad: [B, N] (True = padding) -> [B, Q * CARD_D]"""
         batch = cards.shape[0]
         c = self.card_embed(cards) + self.board_to_card(b).unsqueeze(1)
         c = torch.cat([self.null_card.expand(batch, 1, _CARD_D), c], dim=1)
@@ -118,8 +194,9 @@ class LooNNModel(nn.Module):
         return self.pool_norm(h.reshape(batch, _POOL_QUERIES * _CARD_D))
 
     def forward(self, board: torch.Tensor, cards: torch.Tensor, pad: torch.Tensor) -> torch.Tensor:
-        b = self.board_net(board)
-        h = self.hand_vector(b, cards, pad)
+        rel, demand = relations(board, cards, pad)
+        b = self.board_net(torch.cat([board, demand], -1))
+        h = self.hand_vector(b, torch.cat([cards, rel], -1), pad)
         return self.head(torch.cat([b, h], dim=-1)).squeeze(-1) * _SCORE_SCALE
 
 
@@ -134,19 +211,46 @@ def init() -> None:
     if _CHECKPOINT_PATH.exists():
         try:
             checkpoint = torch.load(_CHECKPOINT_PATH, map_location=_device)
-            if (
-                checkpoint.get("arch") == _ARCH
-                and checkpoint.get("board_dim") == _BOARD_DIM
+            same_inputs = (
+                checkpoint.get("board_dim") == _BOARD_DIM
                 and checkpoint.get("card_dim") == _CARD_DIM
-            ):
+            )
+            if same_inputs and checkpoint.get("arch") == _ARCH:
                 _model.load_state_dict(checkpoint["model_state"])
                 _optimizer.load_state_dict(checkpoint["optimizer_state"])
+                # The saved state carries the learning rate it was saved with
+                for group in _optimizer.param_groups:
+                    group["lr"] = _LEARNING_RATE
                 _train_call_count = checkpoint.get("train_call_count", 0)
+            elif same_inputs and checkpoint.get("arch") == "hand_attn_v2":
+                # The optimizer starts fresh, since its state has the old shapes
+                _model.load_state_dict(_migrate_from_v2(checkpoint["model_state"]))
+                _train_call_count = checkpoint.get("train_call_count", 0)
+                print("[loonn] warm started from the hand_attn_v2 checkpoint")
             else:
                 print("[loonn] checkpoint does not match current architecture; starting fresh")
         except Exception as e:
             print(f"[loonn] failed to load checkpoint, starting fresh: {e}")
     _target_model.load_state_dict(_model.state_dict())
+
+
+def _migrate_from_v2(old: dict) -> dict:
+    """Maps hand_attn_v2 weights onto v3 so the model predicts exactly what it did.
+    The new inputs get zero weights, and the 2 new pool queries copy the old 2:
+    the duplicated pooled vector normalizes the same way, and the head gives
+    the copies zero weight."""
+    new = dict(old)
+
+    def zero_columns(w: torch.Tensor, extra: int) -> torch.Tensor:
+        return torch.cat([w, w.new_zeros(w.shape[0], extra)], dim=1)
+
+    new["board_net.0.weight"] = zero_columns(old["board_net.0.weight"], _DEMAND_DIM)
+    new["card_embed.0.weight"] = zero_columns(old["card_embed.0.weight"], _RELATION_DIM)
+    copies = _POOL_QUERIES // 2
+    for key in ("pool_query.weight", "pool_query.bias", "pool_norm.weight", "pool_norm.bias"):
+        new[key] = old[key].repeat(copies, *[1] * (old[key].dim() - 1))
+    new["head.0.weight"] = zero_columns(old["head.0.weight"], (_POOL_QUERIES - 2) * _CARD_D)
+    return new
 
 
 def _replace_atomically(path: Path, write) -> None:
@@ -155,7 +259,16 @@ def _replace_atomically(path: Path, write) -> None:
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "wb") as f:
         write(f)
-    os.replace(tmp, path)
+    # On Windows the rename fails while another process (antivirus, the search
+    # indexer, the test binary) has the file open, so retry briefly
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
 
 
 def _save_checkpoint() -> None:
@@ -279,18 +392,28 @@ def _open_replay() -> tuple[np.memmap, np.memmap, np.memmap]:
         except (ValueError, OSError):
             meta = {}
     fresh = (
-        meta.get("arch") != _ARCH
+        meta.get("arch") != _REPLAY_ARCH
         or meta.get("capacity") != _REPLAY_CAPACITY
         or not all(p.exists() for p in (_BOARDS_PATH, _HANDS_PATH, _TARGETS_PATH))
     )
     if fresh and _META_PATH.exists():
         print("[loonn] replay buffer does not match current architecture; starting fresh")
     mode = "w+" if fresh else "r+"
-    _replay = (
-        np.memmap(_BOARDS_PATH, dtype=np.float16, mode=mode, shape=(_REPLAY_CAPACITY, _BOARD_DIM)),
-        np.memmap(_HANDS_PATH, dtype=np.int16, mode=mode, shape=(_REPLAY_CAPACITY, _MAX_HAND)),
-        np.memmap(_TARGETS_PATH, dtype=np.float32, mode=mode, shape=(_REPLAY_CAPACITY,)),
-    )
+    # After a crash, Windows (antivirus, or the dying process's handles) can keep
+    # these files locked for minutes, so wait instead of crashing again
+    for attempt in range(60):
+        try:
+            _replay = (
+                np.memmap(_BOARDS_PATH, dtype=np.float16, mode=mode, shape=(_REPLAY_CAPACITY, _BOARD_DIM)),
+                np.memmap(_HANDS_PATH, dtype=np.int16, mode=mode, shape=(_REPLAY_CAPACITY, _MAX_HAND)),
+                np.memmap(_TARGETS_PATH, dtype=np.float32, mode=mode, shape=(_REPLAY_CAPACITY,)),
+            )
+            break
+        except PermissionError:
+            if attempt == 59:
+                raise
+            print("[loonn] replay files are locked; retrying in 10s")
+            time.sleep(10)
     _replay_count = 0 if fresh else int(meta.get("count", 0))
     if fresh:
         _write_meta()
@@ -298,7 +421,7 @@ def _open_replay() -> tuple[np.memmap, np.memmap, np.memmap]:
 
 
 def _write_meta() -> None:
-    _META_PATH.write_text(json.dumps({"arch": _ARCH, "capacity": _REPLAY_CAPACITY, "count": _replay_count}))
+    _META_PATH.write_text(json.dumps({"arch": _REPLAY_ARCH, "capacity": _REPLAY_CAPACITY, "count": _replay_count}))
 
 
 def _append_positions(boards: np.ndarray, hands: np.ndarray, targets: np.ndarray) -> None:
@@ -403,7 +526,8 @@ def train(boards: bytes, cards: bytes, hand_lens: list[int], scores: list[float]
         print(f"[loonn] epoch {epoch + 1}/{_EPOCHS_PER_GAME}  n={n}  mse_loss={avg_epoch_loss:.4f}")
 
     _train_call_count += 1
-    _save_checkpoint()
+    if _train_call_count % _SAVE_EVERY == 0:
+        _save_checkpoint()
     if _train_call_count % _SNAPSHOT_EVERY == 0:
         _SNAPSHOT_DIR.mkdir(exist_ok=True)
         snapshot = _SNAPSHOT_DIR / f"model_hand_attn_{_train_call_count:08d}_player_games.pt"

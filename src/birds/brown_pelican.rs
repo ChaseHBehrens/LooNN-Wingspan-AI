@@ -30,8 +30,8 @@ const PLAY_BIRD: HabitatCollection = HabitatCollection::new();
 const FOOD_CONSTRAINT: FoodCollection = FoodCollection {
     invertebrates: 0,
     seeds: 0,
-    fish: 0,
-    fruits: 1,
+    fish: 1,
+    fruits: 0,
     rodents: 0,
     wilds: 0,
 }; 

@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LooNN Game Viewer</title>
+<style>
+:root {
+  --bg: #f4f2ec; --panel: #ffffff; --ink: #1f2328; --muted: #6b7078; --line: #e2ded4;
+  --accent: #2f6f4e; --accent-ink: #ffffff;
+  --forest: #3d7a4a; --forest-bg: #e6f1e6;
+  --grass: #b08a2e; --grass-bg: #f6efd9;
+  --wet: #2f6f9f; --wet-bg: #e3eef7;
+  --card: #fffdf7; --card-line: #d9d2bf;
+  --new: #e8a33a; --gain: #2f8f5b; --loss: #c2453d;
+  --p0: #d9573b; --p1: #2f7fbf; --p2: #8a5cc2; --p3: #2f9a6a;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a; --panel: #1e2125; --ink: #e8e6e1; --muted: #9aa0a8; --line: #30343a;
+    --accent: #4fae7d; --accent-ink: #0d1a12;
+    --forest: #6fbf7e; --forest-bg: #1d2a21;
+    --grass: #d8b45a; --grass-bg: #2b2719;
+    --wet: #6aa9dc; --wet-bg: #1b2631;
+    --card: #262a2f; --card-line: #3c4148;
+    --shadow: 0 1px 2px rgba(0,0,0,.4);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+button, select { font: inherit; color: inherit; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+  padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 17px; margin: 0 8px 0 0; }
+.seats { display: flex; gap: 6px; align-items: center; }
+.seat { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+.seat b { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: default; }
+#status { color: var(--muted); }
+.spacer { flex: 1; }
+main { max-width: 1400px; margin: 0 auto; padding: 16px 20px 40px; }
+.empty { text-align: center; color: var(--muted); padding: 80px 20px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+.goals { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.goal { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 13px; }
+.goal.current { border-color: var(--accent); color: var(--ink); font-weight: 600; }
+.goal.done { text-decoration: line-through; opacity: .6; }
+.timeline { display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 12px; }
+.timeline .arrow { width: 40px; height: 36px; font-size: 18px; }
+.timeline input[type=range] { flex: 1; accent-color: var(--accent); }
+.step-label { min-width: 240px; font-variant-numeric: tabular-nums; }
+.step-label .sub { color: var(--muted); font-size: 12px; }
+.tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: stretch; }
+.tab { flex: 1; min-width: 150px; text-align: left; border: 1px solid var(--line); background: var(--panel);
+  border-radius: 10px; padding: 8px 12px; cursor: pointer; position: relative; border-top: 4px solid var(--pc); }
+.tab.selected { outline: 2px solid var(--pc); outline-offset: -1px; }
+.tab .name { font-weight: 600; }
+.tab .nums { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tab .score { font-size: 20px; font-weight: 700; color: var(--ink); }
+.tab .acting { position: absolute; top: 8px; right: 10px; font-size: 11px; color: var(--pc); font-weight: 700; }
+.follow { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; padding: 0 4px; white-space: nowrap; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; align-items: start; }
+@media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+.mat { padding: 12px; }
+.row { display: grid; grid-template-columns: 92px repeat(5, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+.row:last-child { margin-bottom: 0; }
+.row-label { border-radius: 8px; display: flex; flex-direction: column; justify-content: center; padding: 8px;
+  font-weight: 700; font-size: 13px; }
+.row-label small { font-weight: 400; color: var(--muted); font-size: 11px; }
+.forest .row-label { background: var(--forest-bg); color: var(--forest); }
+.grassland .row-label { background: var(--grass-bg); color: var(--grass); }
+.wetland .row-label { background: var(--wet-bg); color: var(--wet); }
+.slot { min-height: 128px; border: 1.5px dashed var(--line); border-radius: 8px; position: relative;
+  display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 11px; }
+.slot .cost { position: absolute; bottom: 4px; right: 6px; }
+.bird { width: 100%; height: 100%; min-height: 128px; cursor: pointer; border-radius: 8px; border: 1px solid var(--card-line);
+  background: var(--card); padding: 6px 8px 6px 10px; display: flex; flex-direction: column; gap: 3px;
+  position: relative; overflow: hidden; color: var(--ink); font-size: 12px; }
+.bird::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--power); }
+.bird.new { box-shadow: 0 0 0 2px var(--new); }
+.bird:hover, .hcard:hover { border-color: var(--muted); }
+.bird.inspected, .hcard.inspected { outline: 2px solid var(--ink); outline-offset: 1px; }
+.ptext { font-size: 10.5px; line-height: 1.25; color: var(--muted); display: -webkit-box;
+  -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ptext b { color: var(--ink); font-weight: 700; }
+.hcard .ptext { -webkit-line-clamp: 2; margin-top: 1px; }
+.birdlink { text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; }
+.birdlink:hover { color: var(--accent); }
+.detail { padding: 14px; border-left: 5px solid var(--power); }
+.detail h2 { margin: 0 0 2px; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; }
+.detail .facts { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.detail .ptype { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 4px; background: var(--power); color: #fff; margin-bottom: 6px; }
+.detail.power-when_played .ptype { color: #333; }
+.detail .full { font-size: 13px; line-height: 1.45; }
+.detail .warn { margin-top: 8px; font-size: 12px; color: var(--loss); }
+.detail .hint { color: var(--muted); font-size: 13px; }
+.bird .bname { font-weight: 600; line-height: 1.2; padding-right: 22px; }
+.bird .pts { position: absolute; top: 5px; right: 6px; font-weight: 700; font-size: 12px;
+  background: var(--bg); border-radius: 4px; padding: 0 5px; }
+.bird .meta { color: var(--muted); font-size: 11px; }
+.eggs { display: flex; gap: 2px; flex-wrap: wrap; margin-top: auto; }
+.egg { width: 10px; height: 13px; border-radius: 50% 50% 48% 48% / 60% 60% 40% 40%;
+  border: 1px solid var(--muted); }
+.egg.full { background: #f1e3c4; border-color: #b9a374; }
+.egg.added { background: var(--new); border-color: var(--new); }
+.power-when_activated { --power: #8b5a2b; }
+.power-between_turns { --power: #d46a9c; }
+.power-when_played { --power: #c8c2b4; }
+.power-none { --power: transparent; }
+.detail.power-none { --power: var(--line); }
+.below { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+@media (max-width: 700px) { .below { grid-template-columns: 1fr; } }
+.box { padding: 12px; }
+.box h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.food { display: flex; gap: 6px; flex-wrap: wrap; }
+.token { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--line); font-size: 13px; }
+.hand { display: flex; gap: 6px; flex-wrap: wrap; }
+.hcard { border: 1px solid var(--card-line); background: var(--card); border-radius: 6px; padding: 4px 8px;
+  font-size: 12px; position: relative; padding-left: 10px; overflow: hidden; cursor: pointer; max-width: 100%; }
+.hcard::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--power); }
+.hcard .meta { color: var(--muted); font-size: 11px; }
+.hcard.new { box-shadow: 0 0 0 2px var(--new); }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; font-size: 13px; }
+.kv span:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.side { display: flex; flex-direction: column; gap: 12px; }
+.event h2 { margin: 0 0 2px; font-size: 15px; }
+.event .who { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.event ul { list-style: none; margin: 0; padding: 0; }
+.event li { padding: 4px 0 4px 26px; position: relative; border-bottom: 1px solid var(--line); font-size: 13px; }
+.event li:last-child { border-bottom: 0; }
+.event li i { position: absolute; left: 0; top: 3px; font-style: normal; width: 20px; text-align: center; }
+.event .gain { font-weight: 700; color: var(--gain); }
+.event .none { color: var(--muted); font-style: italic; }
+.tray { display: flex; flex-direction: column; gap: 6px; }
+svg.chart { width: 100%; height: 170px; display: block; }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.legend b { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin-right: 4px; }
+.kbd { font-size: 11px; color: var(--muted); }
+.board { display: grid; grid-template-columns: minmax(0, 1fr) 170px 300px; gap: 12px; margin-bottom: 12px; }
+@media (max-width: 1000px) { .board { grid-template-columns: 1fr 1fr; } .board .tray-box { grid-column: 1 / -1; } }
+.board .box h3 { display: flex; justify-content: space-between; align-items: baseline; }
+.board .box h3 small { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.tray-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tray-cards .hcard { min-height: 74px; }
+.taken { position: relative; opacity: .55; }
+.taken::after { content: "TAKEN"; position: absolute; bottom: 4px; right: 6px; font-size: 10px; font-weight: 700;
+  color: var(--new); letter-spacing: .05em; }
+.pile { display: flex; align-items: center; gap: 12px; }
+.stack { width: 44px; height: 60px; border-radius: 6px; background: var(--accent); position: relative;
+  box-shadow: 3px 3px 0 -1px var(--panel), 3px 3px 0 0 var(--accent), 6px 6px 0 -1px var(--panel), 6px 6px 0 0 var(--accent); }
+.stack.empty { background: transparent; border: 1.5px dashed var(--line); box-shadow: none; }
+.pile .count { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.pile .sub { color: var(--muted); font-size: 12px; }
+.dice { display: flex; gap: 6px; flex-wrap: wrap; }
+.die { width: 40px; height: 40px; border-radius: 8px; border: 1.5px solid var(--card-line); background: var(--card);
+  display: flex; align-items: center; justify-content: center; font-size: 19px; position: relative; }
+.die.small { font-size: 13px; }
+.die.gone { opacity: .3; border-style: dashed; }
+.die.gone::after { content: ""; position: absolute; left: 6px; right: 6px; top: 50%; border-top: 2px solid var(--new); transform: rotate(-20deg); }
+.feeder-note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.feeder-note b { color: var(--new); }
+</style>
+</head>
+<body>
+<header>
+  <h1>LooNN Game Viewer</h1>
+  <div class="seats" id="seats" title="Click a seat to switch between LooNN and Randy (random)"></div>
+  <button class="btn primary" id="newGame">New game</button>
+  <select class="btn" id="past"><option value="">Past games…</option></select>
+  <span id="status"></span>
+  <span class="spacer"></span>
+  <span class="kbd">← → step (one player's turns when "follow turn" is off) · Home/End · 1–4 player</span>
+</header>
+<main id="main"><div class="empty" id="empty">Loading…</div></main>
+
+<script>
+const HABITATS = ["forest", "grassland", "wetland"];
+const HAB_LABEL = { forest: "Forest", grassland: "Grassland", wetland: "Wetland" };
+const HAB_ACTION = { forest: "gain food", grassland: "lay eggs", wetland: "draw cards" };
+const EGG_COST = [0, 1, 1, 2, 2];
+const FOOD_ICON = { invertebrate: "🐛", seed: "🌾", fish: "🐟", fruit: "🍒", rodent: "🐭", wild: "✱", "invertebrate/seed": "🐛/🌾" };
+const POWER_LABEL = { when_activated: "brown power", between_turns: "pink power", when_played: "when played", none: "no power" };
+const KIND_LABEL = { setup: "Setup", turn: "Turn", end_of_round: "End of round", end_of_game: "End of game" };
+const COLORS = ["var(--p0)", "var(--p1)", "var(--p2)", "var(--p3)"];
+
+let game = null, step = 0, selected = 0, follow = true, inspected = null;
+let seats = ["loonn", "loonn", "loonn", "loonn"];
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function renderSeats() {
+  $("seats").innerHTML = seats.map((s, i) =>
+    `<button class="seat" data-i="${i}"><b style="background:${COLORS[i]}"></b>${s === "loonn" ? "LooNN" : "Randy"}</button>`).join("");
+  $("seats").querySelectorAll(".seat").forEach((el) => el.onclick = () => {
+    const i = +el.dataset.i; seats[i] = seats[i] === "loonn" ? "randy" : "loonn"; renderSeats();
+  });
+}
+
+async function loadPast(selectFile) {
+  try {
+    const games = await (await fetch("/api/games")).json();
+    $("past").innerHTML = `<option value="">Past games (${games.length})…</option>` + games.map((g) =>
+      `<option value="${esc(g.file)}">${esc(g.file.replace(".json", "").replace("_", " "))} — ${g.scores.join(" / ")}</option>`).join("");
+    if (selectFile) $("past").value = selectFile;
+    return games;
+  } catch { return []; }
+}
+
+async function openGame(file) {
+  $("status").textContent = "Loading…";
+  const res = await fetch("/api/game?file=" + encodeURIComponent(file));
+  const data = await res.json();
+  if (!res.ok) { $("status").textContent = data.error || "Failed to load"; return; }
+  setGame(data);
+}
+
+function setGame(data) {
+  game = data; step = 0; selected = 0; follow = true; inspected = null;
+  $("status").textContent = "";
+  render();
+}
+
+$("newGame").onclick = async () => {
+  const btn = $("newGame");
+  btn.disabled = true;
+  const started = Date.now();
+  const tick = setInterval(() => {
+    $("status").textContent = `Playing a game… ${Math.round((Date.now() - started) / 1000)}s (about a minute while training runs)`;
+  }, 500);
+  try {
+    const res = await fetch("/api/new?seats=" + seats.join(","));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error + (data.detail ? "\n" + data.detail : ""));
+    setGame(data);
+    loadPast(data.file);
+  } catch (e) {
+    $("status").textContent = "Failed: " + e.message;
+  } finally {
+    clearInterval(tick); btn.disabled = false;
+  }
+};
+$("past").onchange = (e) => { if (e.target.value) openGame(e.target.value); };
+
+document.addEventListener("keydown", (e) => {
+  if (!game || e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  if (e.key === "ArrowRight") { stepBy(1); e.preventDefault(); }
+  else if (e.key === "ArrowLeft") { stepBy(-1); e.preventDefault(); }
+  else if (e.key === "Home") go(0);
+  else if (e.key === "End") go(game.steps.length - 1);
+  else if (["1", "2", "3", "4"].includes(e.key)) { selected = +e.key - 1; follow = false; render(); }
+});
+
+// The step the arrows move to: the next step overall when following turns,
+// otherwise the selected player's next turn (or scoring), skipping everyone else's
+function arrowTarget(dir) {
+  if (follow) {
+    const n = step + dir;
+    return n >= 0 && n < game.steps.length ? n : null;
+  }
+  for (let k = step + dir; k >= 0 && k < game.steps.length; k += dir) {
+    if (game.steps[k].player === selected) return k;
+  }
+  return null;
+}
+
+function stepBy(dir) {
+  const target = game && arrowTarget(dir);
+  if (target !== null && target !== undefined) go(target);
+}
+
+function go(n) {
+  if (!game) return;
+  step = Math.max(0, Math.min(game.steps.length - 1, n));
+  const s = game.steps[step];
+  if (follow && s.player !== null) selected = s.player;
+  render();
+}
+
+function actionIcon(a) {
+  if (a.startsWith("Play ")) return "🐦";
+  if (a.startsWith("Lay an egg")) return "🥚";
+  if (a.startsWith("Discard egg")) return "🍳";
+  if (a.startsWith("Draw ")) return "🃏";
+  if (a.endsWith("from hand")) return "🗑️";
+  if (a.startsWith("Gain ")) return FOOD_ICON[a.split(" ").pop()] || "🍽️";
+  if (a.startsWith("Discard ")) {
+    const f = a.split(" ").pop().replace(/s$/, "").replace("fruit", "fruit");
+    return FOOD_ICON[f] ? "−" + FOOD_ICON[f] : "−";
+  }
+  if (a.startsWith("Tuck")) return "⭐";
+  if (a.startsWith("Hunt")) return "🎯";
+  if (a.startsWith("Activate")) return "⚡";
+  if (a.startsWith("Migrate")) return "➡️";
+  if (a.startsWith("Take bonus")) return "📜";
+  return "•";
+}
+
+function turnSummary(s) {
+  if (s.kind !== "turn") return KIND_LABEL[s.kind];
+  const first = s.actions.find((a) => /^(Play |Lay an egg|Gain |Draw )/.test(a)) || "";
+  if (first.startsWith("Play ")) return "Played a bird";
+  if (first.startsWith("Lay an egg")) return "Laid eggs";
+  if (first.startsWith("Gain ")) return "Gained food";
+  if (first.startsWith("Draw ")) return "Drew cards";
+  return "Turn";
+}
+
+function powerParts(name) {
+  const t = game.birds[name]?.power_text || "";
+  const m = t.match(/^(WHEN ACTIVATED|WHEN PLAYED|ONCE BETWEEN TURNS):\s*([\s\S]*)$/);
+  return m ? { label: m[1], body: m[2] } : { label: "", body: t };
+}
+function shortPower(name) {
+  const { label, body } = powerParts(name);
+  if (!label) return game.birds[name]?.power === "none" ? "No power" : "";
+  const short = { "WHEN ACTIVATED": "Activated", "WHEN PLAYED": "When played", "ONCE BETWEEN TURNS": "Between turns" }[label];
+  return `<b>${short}:</b> ${esc(body)}`;
+}
+function linkBirds(text) {
+  // Make the bird name in an action line clickable
+  let html = esc(text);
+  const names = Object.keys(game.birds).sort((a, b) => b.length - a.length);
+  for (const n of names) {
+    const e = esc(n);
+    if (html.includes(e)) { html = html.split(e).join(`<span class="birdlink" data-bird="${e}">${e}</span>`); break; }
+  }
+  return html;
+}
+function detailPanel() {
+  if (!inspected || !game.birds[inspected]) {
+    return `<div class="panel detail power-none"><div class="hint">Click any bird (on the mat, in hand, in the tray or in the actions above) to see its full card and power.</div></div>`;
+  }
+  const b = game.birds[inspected];
+  const { label, body } = powerParts(inspected);
+  const cost = (b.cost?.food || []).map((f) => `${FOOD_ICON[f] || ""} ${f}`).join(b.cost?.kind === "one_of" ? " or " : " + ");
+  const habs = (b.habitats || []).map((h) => HAB_LABEL[h]).join(", ");
+  const broken = (b.power_text || "").includes("no effect is defined");
+  return `<div class="panel detail power-${b.power}">
+    <h2><span>${esc(inspected)}</span><span>${b.points} pts</span></h2>
+    <div class="facts">${esc(habs)} · ${esc(b.nest)} nest · egg limit ${b.egg_limit} · ${b.wingspan} cm<br>Cost: ${cost || "free"}</div>
+    ${label ? `<div class="ptype">${esc(label)}</div>` : ""}
+    <div class="full">${body ? esc(body) : (b.power === "none" ? "This bird has no power." : "Power text unavailable for this game.")}</div>
+    ${broken ? `<div class="warn">This power does nothing in the current game data, so its effect is probably missing from the bird's definition.</div>` : ""}
+  </div>`;
+}
+
+function birdCard(name, eggs, opts = {}) {
+  const b = game.birds[name] || {};
+  const dots = [];
+  for (let k = 0; k < (b.egg_limit || 0); k++) {
+    const cls = k < eggs ? (k >= eggs - (opts.added || 0) ? "egg added" : "egg full") : "egg";
+    dots.push(`<span class="${cls}"></span>`);
+  }
+  const cost = (b.cost?.food || []).map((f) => FOOD_ICON[f] || f).join(b.cost?.kind === "one_of" ? "/" : "");
+  return `<div class="bird power-${b.power} ${opts.isNew ? "new" : ""} ${inspected === name ? "inspected" : ""}" data-bird="${esc(name)}" title="${esc(b.power_text || name)}">
+    <div class="bname">${esc(name)}</div><div class="pts">${b.points}</div>
+    <div class="meta">${esc(b.nest)} · ${cost}</div>
+    <div class="ptext">${shortPower(name)}</div>
+    <div class="eggs">${dots.join("")}</div></div>`;
+}
+
+function handCard(name, isNew) {
+  const b = game.birds[name] || {};
+  const cost = (b.cost?.food || []).map((f) => FOOD_ICON[f] || f).join(b.cost?.kind === "one_of" ? "/" : "");
+  const habs = (b.habitats || []).map((h) => h[0].toUpperCase()).join("");
+  return `<div class="hcard power-${b.power} ${isNew ? "new" : ""} ${inspected === name ? "inspected" : ""}" data-bird="${esc(name)}" title="${esc(b.power_text || "")}">
+    <b>${esc(name)}</b> <span class="meta">${b.points} pts · ${cost} · ${habs}</span>
+    <div class="ptext">${shortPower(name)}</div></div>`;
+}
+
+function multisetMinus(a, b) {
+  // Items of a not matched by an item of b
+  const left = [...b];
+  return a.filter((x) => { const k = left.indexOf(x); if (k >= 0) { left.splice(k, 1); return false; } return true; });
+}
+function dieHtml(f, gone) {
+  const icon = FOOD_ICON[f] || "?";
+  return `<span class="die ${f.includes("/") ? "small" : ""} ${gone ? "gone" : ""}" title="${esc(f)}${gone ? " (taken)" : ""}">${icon}</span>`;
+}
+function boardPanel(s, prev) {
+  const trayBefore = s.tray_before || s.tray;
+  const taken = new Set(s.kind === "turn" ? multisetMinus(trayBefore, s.tray) : []);
+  const tray = trayBefore.map((n) => {
+    const card = handCard(n, false);
+    return taken.has(n) ? `<div class="taken">${card}</div>` : card;
+  }).join("");
+
+  const deck = s.deck, discard = s.discard;
+  const prevDeck = prev && prev !== s ? prev.deck : undefined;
+  const deckDelta = deck !== undefined && prevDeck !== undefined ? deck - prevDeck : 0;
+  const pile = deck === undefined
+    ? `<div class="pile"><div class="sub">Not recorded in this game. Play a new game to see the draw pile.</div></div>`
+    : `<div class="pile"><div class="stack ${deck ? "" : "empty"}"></div><div>
+         <div class="count">${deck}</div><div class="sub">cards left${deckDelta ? ` (${deckDelta > 0 ? "+" : ""}${deckDelta})` : ""}</div>
+         <div class="sub">${discard} discarded</div></div></div>`;
+
+  const before = s.feeder_before || s.feeder;
+  const after = s.feeder;
+  const rerolled = multisetMinus(after, before).length > 0;
+  let dice, note;
+  if (s.kind !== "turn" || rerolled) {
+    dice = after.map((f) => dieHtml(f, false)).join("");
+    note = rerolled ? `<b>Rerolled</b> during this turn. Showing the dice left after the turn.` : "";
+  } else {
+    const gone = multisetMinus(before, after);
+    const left = [...gone];
+    dice = before.map((f) => { const k = left.indexOf(f); if (k >= 0) { left.splice(k, 1); return dieHtml(f, true); } return dieHtml(f, false); }).join("");
+    note = gone.length ? `<b>${gone.length} taken</b> this turn.` : "";
+  }
+  const outside = 5 - after.length;
+  return `<div class="board">
+    <div class="panel box tray-box"><h3>Bird tray <small>${s.kind === "turn" ? "at the start of this turn" : ""}</small></h3>
+      <div class="tray-cards">${tray || '<span style="color:var(--muted)">empty</span>'}</div></div>
+    <div class="panel box"><h3>Draw pile</h3>${pile}</div>
+    <div class="panel box"><h3>Bird feeder <small>${after.length} in · ${outside} out</small></h3>
+      <div class="dice">${dice || '<span style="color:var(--muted)">empty</span>'}</div>
+      <div class="feeder-note">${note}</div></div>
+  </div>`;
+}
+
+function chartSvg() {
+  const W = 320, H = 170, pad = { l: 28, r: 8, t: 8, b: 18 };
+  const n = game.steps.length;
+  const max = Math.max(10, ...game.steps.flatMap((s) => s.players.map((p) => p.score)));
+  const x = (i) => pad.l + (i / Math.max(1, n - 1)) * (W - pad.l - pad.r);
+  const y = (v) => H - pad.b - (v / max) * (H - pad.t - pad.b);
+  let out = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`;
+  for (let v = 0; v <= max; v += max > 60 ? 20 : 10) {
+    out += `<line x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/>`;
+    out += `<text x="${pad.l - 4}" y="${y(v) + 3}" font-size="9" text-anchor="end" fill="var(--muted)">${v}</text>`;
+  }
+  for (let p = 0; p < 4; p++) {
+    const pts = game.steps.map((s, i) => `${x(i).toFixed(1)},${y(s.players[p].score).toFixed(1)}`).join(" ");
+    out += `<polyline points="${pts}" fill="none" stroke="${COLORS[p]}" stroke-width="${p === selected ? 2.5 : 1.3}" opacity="${p === selected ? 1 : .55}"/>`;
+  }
+  const pred = game.steps.map((s, i) => `${x(i).toFixed(1)},${y(s.predicted[selected]).toFixed(1)}`).join(" ");
+  out += `<polyline points="${pred}" fill="none" stroke="${COLORS[selected]}" stroke-width="1.2" stroke-dasharray="3 3" opacity=".8"/>`;
+  out += `<line x1="${x(step)}" x2="${x(step)}" y1="${pad.t}" y2="${H - pad.b}" stroke="var(--ink)" stroke-width="1" opacity=".5"/>`;
+  return out + "</svg>";
+}
+
+function render() {
+  const main = $("main");
+  if (!game) {
+    main.innerHTML = `<div class="empty">No game loaded. Press <b>New game</b> to play one (takes about a minute), or open a past game.</div>`;
+    return;
+  }
+  const s = game.steps[step];
+  const prev = game.steps[Math.max(0, step - 1)];
+  const me = s.players[selected];
+  const before = step > 0 ? prev.players[selected] : null;
+  const changed = step > 0 && s.player === selected;
+
+  const goals = game.goals.map((g, k) => {
+    const cls = k === s.round && s.kind !== "end_of_game" ? "current" : k < s.round || (k === s.round && s.kind === "end_of_game") ? "done" : "";
+    return `<span class="goal ${cls}">R${k + 1}: ${esc(g)} <b>${me.goal_scores[k]}</b></span>`;
+  }).join("");
+
+  const actor = s.player === null ? "All players" : `${game.players[s.player]} ${s.player + 1}`;
+  const stepSub = s.kind === "setup" ? "Starting hands, food and bonus cards" :
+    `Round ${s.round + 1}${s.kind === "turn" ? ` · turn ${s.turn}` : ""} · ${turnSummary(s)}`;
+
+  const tabs = game.players.map((name, p) => {
+    const pl = s.players[p];
+    const acting = s.player === p ? `<span class="acting">● ${s.kind === "turn" ? "THIS TURN" : "SCORING"}</span>` : "";
+    return `<button class="tab ${p === selected ? "selected" : ""}" data-p="${p}" style="--pc:${COLORS[p]}">${acting}
+      <div class="name">${esc(name)} ${p + 1}</div>
+      <div><span class="score">${pl.score}</span> <span class="nums">pts · predicted ${s.predicted[p].toFixed(0)}</span></div>
+      <div class="nums">${HABITATS.map((h) => pl.habitats[h].length).reduce((a, b) => a + b, 0)} birds · ${pl.eggs} eggs · ${pl.food.length} food · ${pl.hand.length} cards</div></button>`;
+  }).join("");
+
+  const rows = HABITATS.map((h) => {
+    const slots = [];
+    const prevNames = new Set((before?.habitats[h] || []).map((x) => x.bird));
+    for (let k = 0; k < 5; k++) {
+      const slot = me.habitats[h][k];
+      if (slot) {
+        const old = before?.habitats[h].find((x) => x.bird === slot.bird);
+        const added = changed && old ? Math.max(0, slot.eggs - old.eggs) : changed && !old ? slot.eggs : 0;
+        slots.push(birdCard(slot.bird, slot.eggs, { isNew: changed && !prevNames.has(slot.bird), added }));
+      } else {
+        slots.push(`<div class="slot">empty<span class="cost">${EGG_COST[k] ? "🥚".repeat(EGG_COST[k]) : ""}</span></div>`);
+      }
+    }
+    return `<div class="row ${h}"><div class="row-label">${HAB_LABEL[h]}<small>${HAB_ACTION[h]}</small></div>${slots.join("")}</div>`;
+  }).join("");
+
+  const foodCounts = {};
+  me.food.forEach((f) => foodCounts[f] = (foodCounts[f] || 0) + 1);
+  const food = Object.keys(foodCounts).length
+    ? Object.entries(foodCounts).map(([f, n]) => `<span class="token">${FOOD_ICON[f] || ""} ${esc(f)} ×${n}</span>`).join("")
+    : `<span class="none" style="color:var(--muted)">none</span>`;
+  const prevHand = new Set(before?.hand || []);
+  const hand = me.hand.length ? me.hand.map((n) => handCard(n, changed && !prevHand.has(n))).join("")
+    : `<span style="color:var(--muted)">empty</span>`;
+  const birdPts = HABITATS.flatMap((h) => me.habitats[h]).reduce((a, sl) => a + (game.birds[sl.bird]?.points || 0), 0);
+
+  const actions = s.actions.length
+    ? s.actions.map((a) => `<li><i>${actionIcon(a)}</i>${linkBirds(a)}</li>`).join("")
+    : `<li class="none">${s.kind === "setup" ? "Each player kept some of 5 dealt birds and 5 food, and 1 of 2 bonus cards." : "No actions"}</li>`;
+  const gained = s.gained ? `<div class="gain">${s.gained > 0 ? "+" : ""}${s.gained} points</div>` : "";
+
+  main.innerHTML = `
+    <div class="goals">${goals}</div>
+    <div class="panel timeline">
+      <button class="btn arrow" id="prev" ${arrowTarget(-1) === null ? "disabled" : ""} title="${follow ? "Previous step" : "This player's previous turn"} (←)">◀</button>
+      <div class="step-label"><b>Step ${step} / ${game.steps.length - 1}</b> · ${esc(actor)}<div class="sub">${esc(stepSub)}</div></div>
+      <input type="range" id="scrub" min="0" max="${game.steps.length - 1}" value="${step}">
+      <button class="btn arrow" id="next" ${arrowTarget(1) === null ? "disabled" : ""} title="${follow ? "Next step" : "This player's next turn"} (→)">▶</button>
+    </div>
+    ${boardPanel(s, step > 0 ? prev : null)}
+    <div class="tabs">${tabs}
+      <label class="follow"><input type="checkbox" id="follow" ${follow ? "checked" : ""}> follow turn</label></div>
+    <div class="layout">
+      <div>
+        <div class="panel mat">${rows}</div>
+        <div class="below">
+          <div class="panel box"><h3>Food</h3><div class="food">${food}</div>
+            <h3 style="margin-top:12px">Hand (${me.hand.length})</h3><div class="hand">${hand}</div></div>
+          <div class="panel box"><h3>Score so far</h3><div class="kv">
+            <span>Bird cards</span><span>${birdPts}</span>
+            <span>Eggs on mat (scored at end)</span><span>${me.eggs}</span>
+            ${me.bonus.map((b) => `<span>Bonus: ${esc(b.name)}</span><span>${b.score}</span>`).join("")}
+            <span>Turns left</span><span>${me.turns_left}</span>
+            <span>Total scored</span><span>${me.score}</span>
+            <span>LooNN predicts final</span><span>${s.predicted[selected].toFixed(1)}</span></div></div>
+        </div>
+      </div>
+      <div class="side">
+        <div class="panel box event"><h2>${esc(KIND_LABEL[s.kind])}${s.kind === "turn" ? ": " + esc(turnSummary(s).toLowerCase()) : ""}</h2>
+          <div class="who" style="color:${s.player === null ? "var(--muted)" : COLORS[s.player]}">${esc(actor)}</div>
+          ${gained}<ul>${actions}</ul></div>
+        ${detailPanel()}
+        <div class="panel box"><h3>Score over the game</h3>${chartSvg()}
+          <div class="legend">${game.players.map((n, p) => `<span><b style="background:${COLORS[p]}"></b>${esc(n)} ${p + 1}</span>`).join("")}<span>dashed = predicted</span></div></div>
+      </div>
+    </div>`;
+
+  $("prev").onclick = () => stepBy(-1);
+  $("next").onclick = () => stepBy(1);
+  $("scrub").oninput = (e) => go(+e.target.value);
+  $("follow").onchange = (e) => { follow = e.target.checked; if (follow) go(step); };
+  main.querySelectorAll(".tab").forEach((el) => el.onclick = () => { selected = +el.dataset.p; follow = false; render(); });
+  main.querySelectorAll("[data-bird]").forEach((el) => el.onclick = (e) => {
+    e.stopPropagation();
+    inspected = inspected === el.dataset.bird ? null : el.dataset.bird;
+    render();
+  });
+}
+
+renderSeats();
+(async () => {
+  const games = await loadPast();
+  if (games.length) { await openGame(games[0].file); $("past").value = games[0].file; }
+  else render();
+})();
+</script>
+</body>
+</html>

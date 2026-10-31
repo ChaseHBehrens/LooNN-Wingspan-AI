@@ -17,7 +17,7 @@ use loonn::simulation::{
     SimulatedFeeder, 
     SimulatedGoalDeck
 };
-use loonn::evaluators::{ LooNN, exploration };
+use loonn::evaluators::{ LooNN, exploration, random_action_rate, bird_bonus };
 
 
 const PLAYER_COUNT: usize = 4;
@@ -137,7 +137,10 @@ fn run_game(game: usize) {
     }
 
     // Printed as one block so parallel games don't interleave
-    let mut summary = format!("Game {game} (exploration {:.2})\n", exploration());
+    let mut summary = format!(
+        "Game {game} (exploration {:.2}, random actions {:.0}%, bird bonus {:.1})\n",
+        exploration(), random_action_rate() * 100.0, bird_bonus(),
+    );
     for (i, bot) in bots.iter().enumerate() {
         let score = bot.player.accumulated_score();
         let _ = writeln!(summary, "Player {} scored {} points.", i + 1, score);

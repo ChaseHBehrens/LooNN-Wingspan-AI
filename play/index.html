@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play with LooNN</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1f2328; --muted: #6b7078; --line: #e2e0d8;
+    --accent: #2f6f5e; --accent-ink: #ffffff; --warn: #b42318; --highlight: #fff7d6;
+    --forest: #e3efe0; --grassland: #f6efd2; --wetland: #dfeaf3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181b; --panel: #1f2226; --ink: #e6e6e3; --muted: #9a9ea5; --line: #33373d;
+      --accent: #5fb39a; --accent-ink: #0d1411; --warn: #f97066; --highlight: #3a3420;
+      --forest: #1f3024; --grassland: #34301c; --wetland: #1c2b37;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 18px; margin: 0; }
+  .stats { display: flex; gap: 18px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+  .stat { font-size: 13px; color: var(--muted); }
+  .stat b { color: var(--ink); font-size: 16px; }
+  main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr); gap: 18px; padding: 18px 20px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px; } .ask-col { order: -1; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+  button { font: inherit; cursor: pointer; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 7px 12px; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; padding: 9px 16px; }
+  button:disabled { opacity: .5; cursor: default; }
+  input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; width: 100%; }
+  input.bad { border-color: var(--warn); }
+  label.field { display: block; margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+  label.field > span { display: block; margin-bottom: 3px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  @media (max-width: 500px) { .grid2 { grid-template-columns: 1fr; } }
+  .ask { border: 2px solid var(--accent); }
+  .ask h3 { margin: 0 0 12px; font-size: 17px; }
+  .error { color: var(--warn); margin: 0 0 10px; font-size: 14px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .thinking { display: flex; gap: 10px; align-items: center; color: var(--muted); }
+  .spinner { width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; border-radius: 8px; padding: 8px; }
+  .row .label { width: 82px; flex: none; font-weight: 600; font-size: 13px; text-transform: capitalize; align-self: center; }
+  .row.forest { background: var(--forest); } .row.grassland { background: var(--grassland); } .row.wetland { background: var(--wetland); }
+  .slots { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; flex: 1; }
+  .slot { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px; min-height: 64px; font-size: 12px; }
+  .slot.empty { background: transparent; border-style: dashed; }
+  .slot .name { font-weight: 600; font-size: 12.5px; line-height: 1.2; }
+  .slot .meta { color: var(--muted); margin-top: 3px; }
+  .eggs { letter-spacing: 1px; }
+  @media (max-width: 600px) { .row { flex-direction: column; } .slots { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 13px; background: var(--bg); }
+  .chip.card { border-radius: 6px; }
+  .chip small { color: var(--muted); }
+  table.goals { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.goals td { padding: 3px 0; border-bottom: 1px solid var(--line); }
+  table.goals td:last-child { text-align: right; color: var(--muted); }
+
+  #log { max-height: 60vh; overflow-y: auto; }
+  .entry { border-left: 3px solid var(--line); padding: 4px 0 4px 10px; margin-bottom: 10px; }
+  .entry.latest { border-left-color: var(--accent); background: var(--highlight); border-radius: 0 6px 6px 0; padding: 8px 10px; }
+  .entry h4 { margin: 0 0 4px; font-size: 14px; }
+  .entry ul { margin: 0; padding-left: 18px; }
+
+  .dice-faces { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .dice-faces button { padding: 6px 10px; font-size: 13px; }
+  .picked { display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; padding: 6px; border: 1px dashed var(--line); border-radius: 8px; margin-bottom: 10px; }
+  .picked button { padding: 3px 9px; font-size: 13px; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px; }
+  legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; }
+  .checks label { display: flex; gap: 5px; align-items: center; text-transform: capitalize; }
+  .checks input { width: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Play with LooNN</h1>
+  <div class="stats">
+    <span class="stat">Score <b id="score">–</b></span>
+    <span class="stat">Predicted final <b id="predicted">–</b></span>
+    <span class="stat">Turns left <b id="turns">–</b></span>
+    <button id="restart">New game</button>
+  </div>
+</header>
+<main>
+  <div class="board-col">
+    <section class="panel"><h2>LooNN's mat</h2><div id="mat"><p class="muted">Enter the setup to start.</p></div></section>
+    <section class="panel"><h2>Hand</h2><div id="hand" class="chips"></div></section>
+    <div class="grid2">
+      <section class="panel"><h2>Food</h2><div id="food" class="chips"></div></section>
+      <section class="panel"><h2>Bonus cards</h2><div id="bonus" class="chips"></div></section>
+    </div>
+    <section class="panel"><h2>Round goals</h2><div id="goals"></div></section>
+  </div>
+  <div class="ask-col">
+    <section class="panel ask" id="ask"></section>
+    <section class="panel"><h2>LooNN's moves — make these on the table</h2><div id="log"></div></section>
+  </div>
+</main>
+<datalist id="bird-names"></datalist>
+
+<script>
+const FOOD_ICON = { invertebrate: "🐛", seed: "🌾", fish: "🐟", fruit: "🍒", rodent: "🐭", wild: "✳️", "invertebrate/seed": "🐛/🌾" };
+const HABITATS = ["forest", "grassland", "wetland"];
+const FOODS = ["invertebrate", "seed", "fish", "fruit", "rodent"];
+let catalog = null, seq = -1, viewText = "", view = null, sending = false;
+let backend = null, awaiting = -1, promptKind = null;
+
+const $ = id => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null) e.append(kid);
+  return e;
+};
+const birdNames = () => Object.keys(catalog.birds);
+const findName = (list, name) => list.find(n => n.toLowerCase() === name.trim().toLowerCase());
+const foodText = f => `${FOOD_ICON[f] || ""} ${f}`;
+
+function birdTitle(name) {
+  const b = catalog.birds[name];
+  if (!b) return name;
+  const cost = b.cost.food.length ? b.cost.food.join(b.cost.kind === "one_of" ? " or " : " + ") : "free";
+  return `${name}\n${b.points} pts · ${b.habitats.join("/")} · ${b.nest} nest · ${b.egg_limit} eggs · ${b.wingspan} cm\nCost: ${cost}\n${b.power_text || "No power"}`;
+}
+
+async function send(lines) {
+  if (sending) return;
+  sending = true;
+  document.querySelectorAll("#ask button").forEach(b => b.disabled = true);
+  // Shows that LooNN is thinking until a newer prompt arrives
+  awaiting = seq;
+  renderPrompt(null, "LooNN is thinking…");
+  try {
+    await backend.answer(seq, lines);
+  } finally {
+    sending = false;
+  }
+}
+
+// ---- Board ----
+
+function renderView() {
+  const p = view.player;
+  $("score").textContent = p ? p.score : "–";
+  $("predicted").textContent = view.predicted ?? "–";
+  $("turns").textContent = p ? p.turns_left : "–";
+  if (p) {
+    $("mat").replaceChildren(...HABITATS.map(h => el("div", { class: `row ${h}` },
+      el("div", { class: "label" }, h),
+      el("div", { class: "slots" }, [0, 1, 2, 3, 4].map(i => {
+        const s = p.habitats[h][i];
+        if (!s) return el("div", { class: "slot empty" });
+        const b = catalog.birds[s.bird];
+        return el("div", { class: "slot", title: birdTitle(s.bird) },
+          el("div", { class: "name" }, s.bird),
+          el("div", { class: "meta" }, `${b.points} pts `,
+            el("span", { class: "eggs" }, "●".repeat(s.eggs) + "○".repeat(Math.max(0, b.egg_limit - s.eggs)))));
+      })))));
+    $("hand").replaceChildren(...(p.hand.length ? p.hand.map(n => el("span", { class: "chip card", title: birdTitle(n) },
+      n, " ", el("small", {}, `${catalog.birds[n].points} pts`))) : [el("span", { class: "muted" }, "Empty")]));
+    $("food").replaceChildren(...(p.food.length ? p.food.map(f => el("span", { class: "chip" }, foodText(f))) : [el("span", { class: "muted" }, "None")]));
+    $("bonus").replaceChildren(...p.bonus.map(b => el("span", { class: "chip card" }, b.name, " ", el("small", {}, `${b.score} pts now`))));
+    $("goals").replaceChildren(el("table", { class: "goals" }, p.goals.map((g, i) =>
+      el("tr", {}, el("td", {}, `Round ${i + 1}: ${g.name}`), el("td", {}, `${g.score} now`)))));
+  } else {
+    $("mat").replaceChildren(el("p", { class: "muted" }, "Enter the setup to start."));
+    ["hand", "food", "bonus", "goals"].forEach(id => $(id).replaceChildren());
+  }
+  const log = [...view.log].reverse();
+  $("log").replaceChildren(...(log.length ? log.map((e, i) => el("div", { class: "entry" + (i === 0 ? " latest" : "") },
+    el("h4", {}, e.title),
+    e.lines.length ? el("ul", {}, e.lines.map(l => el("li", {}, l))) : el("div", { class: "muted" }, "Nothing to do")))
+    : [el("p", { class: "muted" }, "LooNN hasn't moved yet.")]));
+}
+
+// ---- Prompts ----
+
+function birdInput(value = "", placeholder = "Type a bird name…") {
+  const input = el("input", { list: "bird-names", placeholder, value, autocomplete: "off" });
+  const check = () => input.classList.toggle("bad", input.value.trim() !== "" && !findName(birdNames(), input.value));
+  input.addEventListener("input", check);
+  input.addEventListener("change", () => { input.title = findName(birdNames(), input.value) ? birdTitle(findName(birdNames(), input.value)) : ""; });
+  return input;
+}
+
+function select(options, value = "") {
+  return el("select", {}, el("option", { value: "" }, "Choose…"),
+    options.map(o => el("option", { value: o, selected: o === value }, o)));
+}
+
+const field = (label, input) => el("label", { class: "field" }, el("span", {}, label), input);
+
+function submitOnEnter(form, inputs) {
+  inputs.forEach(i => i.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !(i.list && i.value && !findName(birdNames(), i.value))) { e.preventDefault(); form(); }
+  }));
+}
+
+const PROMPTS = {
+  setup(p) {
+    const goals = [0, 1, 2, 3].map(() => select(catalog.goals));
+    const birds = [0, 1, 2, 3, 4].map(() => birdInput());
+    const bonuses = [0, 1].map(() => select(catalog.bonuses));
+    const go = () => send([
+      ...goals.map(g => "goal:" + g.value),
+      ...birds.map(b => "bird:" + (findName(birdNames(), b.value) || b.value)),
+      ...bonuses.map(b => "bonus:" + b.value),
+    ]);
+    return [
+      el("p", { class: "muted" }, "Deal LooNN 5 birds and 2 bonus cards, then enter them with the round goals. LooNN will choose what to keep and you'll give it 5 food minus the birds it keeps."),
+      el("fieldset", {}, el("legend", {}, "Round goals"), el("div", { class: "grid2" }, goals.map((g, i) => field(`Round ${i + 1}`, g)))),
+      el("fieldset", {}, el("legend", {}, "Birds dealt to LooNN"), birds.map((b, i) => field(`Bird ${i + 1}`, b))),
+      el("fieldset", {}, el("legend", {}, "Bonus cards dealt to LooNN"), bonuses.map((b, i) => field(`Bonus ${i + 1}`, b))),
+      el("button", { class: "primary", onclick: go }, "Start game"),
+    ];
+  },
+
+  bird(p) {
+    const input = birdInput();
+    const go = () => send([findName(birdNames(), input.value) || input.value]);
+    submitOnEnter(go, [input]);
+    setTimeout(() => input.focus());
+    return [input, el("div", { style: "margin-top:10px" }, el("button", { class: "primary", onclick: go }, "Done"))];
+  },
+
+  bonus(p) {
+    const s = select(catalog.bonuses);
+    return [s, el("div", { style: "margin-top:10px" }, el("button", { class: "primary", onclick: () => send([s.value]) }, "Done"))];
+  },
+
+  tray(p) {
+    const inputs = [0, 1, 2].map(i => birdInput(p.prefill[i] || "", "Empty slot"));
+    const go = () => send(inputs.map(i => findName(birdNames(), i.value) || i.value).filter(v => v.trim()));
+    submitOnEnter(go, inputs);
+    setTimeout(() => inputs[0].focus());
+    return [
+      p.prefill.length ? el("p", { class: "muted" }, "Filled in with the birds left in the tray last time LooNN looked.") : null,
+      inputs.map((i, n) => field(`Slot ${n + 1}`, i)),
+      el("button", { class: "primary", onclick: go }, "Done"),
+    ];
+  },
+
+  dice(p) {
+    let picked = [...p.prefill];
+    const box = el("div", { class: "picked" });
+    const count = el("span", { class: "muted" });
+    const done = el("button", { class: "primary" }, "Done");
+    const draw = () => {
+      box.replaceChildren(...(picked.length ? picked.map((d, i) =>
+        el("button", { title: "Remove", onclick: () => { picked.splice(i, 1); draw(); } }, `${FOOD_ICON[d]} ${d} ✕`))
+        : [el("span", { class: "muted" }, "No dice")]));
+      count.textContent = p.min === p.max ? `${picked.length} of ${p.max} dice` : `${picked.length} dice (up to ${p.max})`;
+      done.disabled = picked.length < p.min || picked.length > p.max;
+    };
+    done.addEventListener("click", () => send(picked));
+    draw();
+    return [
+      el("p", { class: "muted" }, "Click a face to add a die, click a die to remove it."),
+      el("div", { class: "dice-faces" }, catalog.dice.map(d =>
+        el("button", { onclick: () => { if (picked.length < p.max) { picked.push(d); draw(); } } }, `${FOOD_ICON[d]} ${d}`))),
+      box,
+      el("div", { style: "display:flex;gap:12px;align-items:center" }, done, el("button", { onclick: () => { picked = []; draw(); } }, "Clear"), count),
+    ];
+  },
+
+  turn(p) {
+    const player = view.player;
+    const checks = [];
+    const check = (value, label, on = false) => {
+      const box = el("input", { type: "checkbox", value, checked: on });
+      checks.push(box);
+      return el("label", {}, box, label);
+    };
+    const shared = birdInput("", "Bird name (optional)");
+    const fewest = el("div", { class: "checks" }, HABITATS.map(h => check("fewest:" + h, h, player.fewest.includes(h))));
+    const parts = [];
+    if (player.between_turns) {
+      parts.push(el("fieldset", {}, el("legend", {}, "Since LooNN's last turn, did another player…"),
+        el("div", { class: "checks" }, check("lay_egg", "lay eggs"), check("hunt", "succeed at a hunt")),
+        el("div", { class: "muted", style: "margin-top:6px" }, "play a bird in:"),
+        el("div", { class: "checks" }, HABITATS.map(h => check("play_bird:" + h, h))),
+        el("div", { class: "muted", style: "margin-top:6px" }, "gain food:"),
+        el("div", { class: "checks" }, FOODS.map(f => check("gain_food:" + f, foodText(f))))));
+    }
+    const fewestBox = el("fieldset", {}, el("legend", {}, "LooNN has the fewest birds (ties count) in…"), fewest);
+    if (player.uses_fewest) parts.push(fewestBox);
+    const extra = el("details", {},
+      el("summary", { class: "muted" }, "More"),
+      player.uses_fewest ? null : fewestBox,
+      field("Did another player activate a power where all players benefit? Which bird?", shared));
+    const go = () => {
+      const lines = checks.filter(c => c.checked).map(c => c.value);
+      const name = findName(birdNames(), shared.value);
+      if (name) lines.push("shared:" + name);
+      send(lines);
+    };
+    return [
+      p.last ? el("p", { class: "muted" }, "LooNN has taken all its turns.") :
+        el("p", { class: "muted" }, "When the other players have taken their turns, tell LooNN about anything that triggers its powers and let it play."),
+      ...parts, extra,
+      el("div", { style: "margin-top:12px" }, el("button", { class: "primary", onclick: go }, p.last ? "Score the game" : "Play LooNN's turn")),
+    ];
+  },
+
+  over(p) {
+    return [el("p", {}, `LooNN finished with ${view.player ? view.player.score : "?"} points.`),
+      el("button", { class: "primary", onclick: restart }, "New game")];
+  },
+
+  error(p) {
+    return [el("p", { class: "muted" }, "The game stopped. Start a new one to keep playing."),
+      el("button", { class: "primary", onclick: restart }, "New game")];
+  },
+};
+
+function renderPrompt(p, thinking) {
+  const ask = $("ask");
+  promptKind = p ? p.kind : null;
+  if (!p) {
+    ask.replaceChildren(el("div", { class: "thinking" }, el("div", { class: "spinner" }), thinking || (view ? view.status : "Loading…")));
+    return;
+  }
+  const body = (PROMPTS[p.kind] || (() => []))(p);
+  ask.replaceChildren(...[el("h3", {}, p.title), p.error ? el("p", { class: "error" }, p.error) : null, ...body.flat()].filter(Boolean));
+}
+
+async function restart() {
+  if (view && view.player && view.status !== "Game over" && !confirm("Abandon this game and start a new one?")) return;
+  // After an error the next prompt can have a lower seq, so don't wait for a higher one
+  awaiting = promptKind === "error" ? -1 : seq;
+  renderPrompt(null, "Starting a new game…");
+  await backend.restart();
+}
+
+function onState(state) {
+  if (state.view) {
+    const text = JSON.stringify(state.view);
+    if (text !== viewText) { viewText = text; view = state.view; renderView(); }
+  }
+  if (state.seq <= awaiting) return;
+  awaiting = -1;
+  // A prompt is redrawn only when it changes, so typing isn't lost
+  if (!state.prompt) renderPrompt(null);
+  else if (state.seq !== seq) renderPrompt(state.prompt);
+  seq = state.prompt ? state.seq : -1;
+}
+
+function showError(message) {
+  awaiting = -1;
+  seq = -1;
+  renderPrompt({ kind: "error", title: `Something went wrong: ${message}`, error: null });
+}
+
+// ---- Running the game ----
+// With the local server (cargo run --release --bin play) the game runs there, on
+// the PyTorch network. Anywhere else, such as GitHub Pages, it runs in this
+// browser: web/worker.js runs the engine compiled to WebAssembly.
+
+function serverBackend() {
+  let timer = null;
+  async function poll() {
+    clearTimeout(timer);
+    try {
+      onState(await (await fetch("api/state", { cache: "no-store" })).json());
+    } catch (e) {
+      showError("can't reach the server. Is `cargo run --release --bin play` running?");
+    }
+    timer = setTimeout(poll, 500);
+  }
+  return {
+    local: false,
+    start: poll,
+    answer: (seq, lines) => fetch("api/answer", { method: "POST", body: [seq, ...lines].join("\n") }).then(poll),
+    restart: () => fetch("api/restart", { method: "POST" }).then(poll),
+  };
+}
+
+function workerBackend(gotCatalog) {
+  let worker = null, crashed = false;
+  function spawn() {
+    crashed = false;
+    worker = new Worker("worker.js", { type: "module" });
+    worker.onmessage = ({ data }) => {
+      if (data.type === "catalog") gotCatalog(data.catalog);
+      else if (data.type === "state") onState(data.state);
+      else if (data.type === "error") { crashed = true; showError(data.message); }
+    };
+    worker.onerror = e => { crashed = true; showError(e.message || "the game failed to load"); };
+  }
+  return {
+    local: true,
+    start: spawn,
+    answer: (seq, lines) => worker.postMessage({ type: "answer", seq, lines }),
+    restart() {
+      if (!crashed) return worker.postMessage({ type: "restart" });
+      // A crashed WebAssembly game can't be trusted, so start a fresh one
+      worker.terminate();
+      seq = awaiting = -1;
+      spawn();
+    },
+  };
+}
+
+async function connect() {
+  try {
+    const response = await fetch("api/catalog", { cache: "no-store" });
+    if (response.ok && (response.headers.get("content-type") || "").includes("json")) {
+      return [serverBackend(), await response.json()];
+    }
+  } catch { }
+  let gotCatalog;
+  const catalogLoaded = new Promise(resolve => gotCatalog = resolve);
+  const worker = workerBackend(gotCatalog);
+  worker.start();
+  return [worker, await catalogLoaded];
+}
+
+$("restart").addEventListener("click", restart);
+// The browser-run game lives in this tab only
+addEventListener("beforeunload", e => {
+  if (backend && backend.local && view && view.player && view.status !== "Game over") e.preventDefault();
+});
+(async () => {
+  renderPrompt(null, "Loading LooNN…");
+  let catalogJson;
+  [backend, catalogJson] = await connect();
+  catalog = catalogJson;
+  $("bird-names").replaceChildren(...birdNames().map(n => el("option", { value: n })));
+  if (!backend.local) backend.start();
+})();
+</script>
+</body>
+</html>

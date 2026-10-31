@@ -68,7 +68,10 @@ impl Bot {
         let mut evaluator = match eval_type {
             EvaluatorType::Randy => Evaluators::Randy(Randy::new()),
             EvaluatorType::LooNN => Evaluators::LooNN(
-                LooNN::new().expect("Failed to construct LooNN")
+                match bonus_arg() {
+                    Some(bonus) => LooNN::with_bird_bonus(bonus),
+                    None => LooNN::new(),
+                }.expect("Failed to construct LooNN")
             ),
         };
 
@@ -117,6 +120,12 @@ fn loading_bar(current: usize, total: usize) {
     let percent = (progress * 100.0) as u32;
     print!("\r[{}] {:>3}% ({}/{})", bar, percent, current, total);
     let _ = io::stdout().flush();
+}
+
+/// Points per bird LooNN adds when choosing (third command-line argument); without
+/// it LooNN uses the current bird bonus, as in training
+fn bonus_arg() -> Option<f32> {
+    env::args().nth(3).and_then(|s| s.parse().ok())
 }
 
 /// Players per test game, matching training. Seats alternate between Randy and LooNN.
@@ -226,6 +235,7 @@ fn evaluate(games: usize, max_turn: Option<usize>) {
         Some(t) => println!("--- {} turn(s)/player, {} {}-player games ---", t, games, PLAYER_COUNT),
         None => println!("--- Full games, {} {}-player games ---", games, PLAYER_COUNT),
     }
+    if let Some(bonus) = bonus_arg() { println!("LooNN bird bonus: {bonus} points per bird when choosing"); }
     println!("Randy averaged {} points", randy / games as f32);
     println!("LooNN averaged {} points", loonn / games as f32);
     let m = (loonn / games as f32) - (randy / games as f32);
@@ -234,7 +244,7 @@ fn evaluate(games: usize, max_turn: Option<usize>) {
     println!();
 }
 
-/// Usage: test [full | turn cap[,turn cap...]] [games]
+/// Usage: test [full | turn cap[,turn cap...]] [games] [bird bonus]
 fn main() { 
     let args: Vec<String> = env::args().collect();
 

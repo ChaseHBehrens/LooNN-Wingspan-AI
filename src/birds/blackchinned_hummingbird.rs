@@ -44,7 +44,7 @@ const POWER: Power = Power {
     food_constraint: FOOD_CONSTRAINT,
     hunt_dice: false,
     feeder: false,
-    gain_food: 0,
+    gain_food: 1,
     discard_food: false,
     self_constraint: false,
     nest_constraint: Nest::None,

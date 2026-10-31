@@ -29,7 +29,7 @@ const PLAY_BIRD: HabitatCollection = HabitatCollection::new();
 
 const FOOD_CONSTRAINT: FoodCollection = FoodCollection::new(); 
 
-const POWER: Activation = Activation::WhenActivated(Power {
+const POWER: Activation = Activation::WhenPlayed(Power {
     play_bird_in_this_habitat: false,
     play_bird: PLAY_BIRD,
     migration: false,

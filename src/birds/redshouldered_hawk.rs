@@ -48,7 +48,7 @@ const POWER: Activation = Activation::WhenActivated(Power {
     face_up_constraint: false,
     deck_constraint: false,
     draw_bird: 0,
-    tuck_or_cache: 0,
+    tuck_or_cache: 1,
     discard_bird: false,
     repeat_power: None,
     draw_bonus: false,

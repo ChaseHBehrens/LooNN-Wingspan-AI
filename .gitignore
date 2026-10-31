@@ -22,3 +22,9 @@ flamegraph.svg
 # Watchdog logs, and temporary files from atomic saves
 /logs/
 /neural_network/*.tmp
+
+# Games saved by the web viewer
+/viewer/games/
+
+# The standalone play page, built by web/build.sh
+/site/

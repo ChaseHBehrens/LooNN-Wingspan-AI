@@ -22,6 +22,12 @@ impl SimulatedBirdDeck {
             logged,
         }
     }
+
+    /// Cards left in the draw pile
+    pub fn deck_len(&self) -> usize { self.deck.len() }
+
+    /// Cards in the discard pile, which is shuffled back in when the deck runs out
+    pub fn discard_len(&self) -> usize { self.discard_pile.len() }
 }
 
 impl BirdDealer for SimulatedBirdDeck {

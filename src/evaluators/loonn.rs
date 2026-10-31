@@ -8,22 +8,8 @@ use std::sync::mpsc::{ channel, Receiver, Sender };
 use std::thread;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
-use crate::core::{ 
-    Evaluator, 
-    Cost,
-    FoodCollection, 
-    HabitatCollection, HABITATS,
-    Player, 
-    Power,
-    Nest, 
-    Niche,
-    Bird, BirdSlot,
-    Activation, Trigger,
-    Position,
-};
-
-type Board = Vec<f32>;
-type Hand = Vec<Vec<f32>>;
+use crate::core::{ Evaluator, Player };
+use super::features::vectorize_player;
 
 /// Player states packed for Python as little-endian f32 bytes
 #[derive(Default)]
@@ -65,13 +51,26 @@ enum Request {
 static SERVER: Mutex<Option<Sender<Request>>> = Mutex::new(None);
 static SCORE_LOG: Mutex<()> = Mutex::new(());
 
-/// Exploration noise, in points, at the start of training
-const EXPLORATION_START: f32 = 1.0;
-/// Exploration noise, in points, once the schedule finishes
+/// Player-games already trained when the current schedules began. The first run
+/// used noise alone and settled into hoarding food; the schedules below restart here.
+const SCHEDULE_START_PLAYER_GAMES: usize = 9_101;
+/// Noise on every choice, in points, at the start of the schedule
+const EXPLORATION_START: f32 = 0.5;
+/// Noise on every choice, in points, once the schedule finishes
 const EXPLORATION_END: f32 = 0.2;
-/// Player-games over which exploration falls linearly from start to end
-/// (about 3.5 hours of 4 player games at 8 games in parallel)
-const EXPLORATION_PLAYER_GAMES: usize = 8_000;
+/// Chance of a random kind of action on a turn, at the start of the schedule
+const RANDOM_ACTION_START: f32 = 0.15;
+/// Chance of a random kind of action on a turn, once the schedule finishes
+const RANDOM_ACTION_END: f32 = 0.05;
+/// Player-games over which noise and random actions fall linearly from start to end
+/// (about 10 hours of 4 player games at 8 games in parallel)
+const EXPLORATION_PLAYER_GAMES: usize = 10_000;
+/// Points added per bird on the mat when choosing, in training and in play. The
+/// network undervalues birds, and fading bonuses taught it only about 1 point of
+/// that. At 130k player-games, 100 games against Randy at each bonus scored 62.0
+/// (none), 66.1 (1), 66.8 (2), 65.6 (3) and 68.0 (4), so the bonus is permanent.
+/// Only choices are biased, never the scores it learns from.
+const BIRD_BONUS: f32 = 2.0;
 const SCORE_LOG_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/neural_network/game_scores.csv");
 
 /// Training player-games finished so far, including earlier runs from the score log
@@ -81,11 +80,26 @@ static PLAYER_GAMES: AtomicUsize = AtomicUsize::new(0);
 /// player-games trained, so the training games follow the network's own choices
 /// more and more closely.
 pub fn exploration() -> f32 {
-    let progress = PLAYER_GAMES.load(Ordering::Relaxed) as f32 / EXPLORATION_PLAYER_GAMES as f32;
-    EXPLORATION_START + (EXPLORATION_END - EXPLORATION_START) * progress.min(1.0)
+    let progress = schedule_progress(EXPLORATION_PLAYER_GAMES);
+    EXPLORATION_START + (EXPLORATION_END - EXPLORATION_START) * progress
 }
 
-/// Picks up the player-game count from the score log so a restarted run keeps its place in the schedule
+/// Chance of a random kind of action on a turn. Falls on the same schedule as `exploration()`.
+pub fn random_action_rate() -> f32 {
+    let progress = schedule_progress(EXPLORATION_PLAYER_GAMES);
+    RANDOM_ACTION_START + (RANDOM_ACTION_END - RANDOM_ACTION_START) * progress
+}
+
+/// Points added per bird on the mat when choosing
+pub fn bird_bonus() -> f32 { BIRD_BONUS }
+
+/// Fraction of `length` player-games trained since the schedules began, capped at 1
+fn schedule_progress(length: usize) -> f32 {
+    let trained = PLAYER_GAMES.load(Ordering::Relaxed).saturating_sub(SCHEDULE_START_PLAYER_GAMES);
+    (trained as f32 / length as f32).min(1.0)
+}
+
+/// Picks up the player-game count from the score log so a restarted run keeps its place in the schedules
 fn load_player_games() {
     let Ok(log) = std::fs::read_to_string(SCORE_LOG_PATH) else { return };
     PLAYER_GAMES.store(log.lines().count().saturating_sub(1), Ordering::Relaxed);
@@ -104,7 +118,12 @@ fn connect() -> PyResult<Sender<Request>> {
     })?;
     load_player_games();
     let (sender, requests) = channel();
-    thread::spawn(move || serve(py_module, requests));
+    // Python and PyTorch run on this thread; the default 2 MB stack overflowed once
+    thread::Builder::new()
+        .name("loonn-inference".into())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || serve(py_module, requests))
+        .expect("failed to spawn LooNN inference thread");
     *server = Some(sender.clone());
     Ok(sender)
 }
@@ -176,18 +195,29 @@ pub struct LooNN {
     server: Sender<Request>,
     rng: ThreadRng,
     explore: bool,
+    /// Points per bird on the mat added when choosing outside training, for testing
+    /// whether the network undervalues birds
+    fixed_bird_bonus: f32,
 }
 
 impl LooNN {
-    /// Plays greedily, always choosing the highest evaluation
+    /// Plays greedily, always choosing the highest evaluation plus the current bird bonus
     pub fn new() -> PyResult<Self> {
+        // Connecting reads the score log, which the bird bonus depends on
+        let server = connect()?;
         Ok(Self {
             history: Vec::new(),
             evaluation_sum: 0.0,
-            server: connect()?,
+            server,
             rng: rng(),
             explore: false,
+            fixed_bird_bonus: bird_bonus(),
         })
+    }
+
+    /// Plays greedily, adding `bonus` points per bird on the mat when choosing instead of the current bird bonus
+    pub fn with_bird_bonus(bonus: f32) -> PyResult<Self> {
+        Ok(Self { fixed_bird_bonus: bonus, ..Self::new()? })
     }
 
     /// Adds exploration noise to evaluations, for training
@@ -271,10 +301,14 @@ impl Evaluator for LooNN {
             .map(|((score, t), p)| (score, t, p))
             .max_by(|a, b| a.0.total_cmp(&b.0))?;
         if played {
+            self.evaluation_sum += score - self.bias(&p);
             self.history.push(p.clone());
-            self.evaluation_sum += score;
         }
         Some((t, p))
+    }
+
+    fn random_action_rate(&self) -> f32 {
+        if self.explore { random_action_rate() } else { 0.0 }
     }
 }
 
@@ -287,286 +321,12 @@ impl LooNN {
             exploration() * (-(-u.ln()).ln())
         } else { 0.0 };
         let noisy_score = score + noise;
-        // TEST: try adding a bias towards having more birds
-        //let bias: f32 = HABITATS.into_iter()
-        //    .map(|h| {
-        //        match player.habitat(h).len() {
-        //            1 => 5.0,
-        //            2 => 10.0,
-        //            3 => 15.0,
-        //            4 => 20.0,
-        //            5 => 25.0,
-        //            _ => 0.0
-        //        }
-        //    })
-        //    .sum::<f32>();
-        //let biased_score = noisy_score + bias;
-        noisy_score.max(0.0) + player.accumulated_score() as f32
+        noisy_score.max(0.0) + player.accumulated_score() as f32 + self.bias(player)
+    }
+
+    /// Bonus for birds on the mat while training, which steers choices but not predictions
+    fn bias(&self, player: &Player) -> f32 {
+        let per_bird = if self.explore { bird_bonus() } else { self.fixed_bird_bonus };
+        per_bird * player.bird_slots().count() as f32
     }
 }
-
-
-fn vectorize_power(power: &Power) -> Vec<f32> {
-    let mut v = Vec::<f32>::new();
-    v.push(power.play_bird_in_this_habitat.into());
-    v.extend(vectorize_habitat_collection(&power.play_bird));
-    v.push(power.migration.into());
-    if let Some(bird) = power.hunt_bird {
-        v.push(1.0);
-        v.push(bird as f32 / 300.0);
-    } else {
-        v.extend(vec![0.0, 0.0]);
-    }
-    v.extend(vectorize_food_constraint(&power.food_constraint));
-    v.push(power.hunt_dice.into());
-    v.push(power.feeder.into());
-    v.push(power.gain_food as f32 / 2.0);
-    v.push(power.discard_food.into());
-    v.push(power.self_constraint.into());
-    v.extend(vectorize_nest(&power.nest_constraint));
-    v.push(power.lay_eggs_on_all.into());
-    v.push(power.lay_eggs as f32 / 2.0);
-    v.push(power.discard_egg.into());
-    v.extend(vectorize_habitat_collection(&power.fewest_birds.into()));
-    v.push(power.face_up_constraint.into());
-    v.push(power.deck_constraint.into());
-    v.push(power.draw_bird as f32 / 2.0);
-    v.push(power.tuck_or_cache as f32 / 2.0);
-    v.push(power.discard_bird.into());
-    if let Some(niche) = power.repeat_power {
-        v.push(1.0);
-        v.extend(vectorize_niche(&niche))
-    } else { v.extend(vec![0.0, 0.0, 0.0]); }
-    v.push(power.draw_bonus.into());
-    v
-}
-
-fn vectorize_habitat_collection(habitat_collection: &HabitatCollection) -> Vec<f32> {
-    vec![
-        habitat_collection.forest.into(),
-        habitat_collection.grassland.into(),
-        habitat_collection.wetland.into(),
-    ]
-}
-
-fn vectorize_food_constraint(food: &FoodCollection) -> Vec<f32> {
-    vec![
-        food.invertebrates as f32,
-        food.seeds as f32,
-        food.fish as f32,
-        food.fruits as f32,
-        food.rodents as f32,
-    ]
-}
-
-fn vectorize_food_collection(food: &FoodCollection) -> Vec<f32> {
-    vec![
-        food.invertebrates as f32 / 2.0,
-        food.seeds as f32 / 2.0,
-        food.fish as f32 / 2.0,
-        food.fruits as f32 / 2.0,
-        food.rodents as f32 / 2.0,
-        food.wilds as f32 / 2.0,
-    ]
-}
-
-/// Food that must be paid, followed by flags for foods that can be paid as 1 of
-fn vectorize_cost(cost: &Cost) -> Vec<f32> {
-    match cost {
-        Cost::All(food) => [vectorize_food_collection(food), vec![0.0; 6]].concat(),
-        Cost::OneOf(foods) => [
-            vec![0.0; 6],
-            vectorize_food_collection(foods).into_iter().map(|f| (f > 0.0).into()).collect(),
-        ].concat(),
-    }
-}
-
-fn vectorize_food_supply(food: &FoodCollection) -> Vec<f32> {
-    vec![
-        (food.invertebrates as f32 / 15.0).clamp(0.0, 1.0),
-        (food.seeds as f32 / 15.0).clamp(0.0, 1.0),
-        (food.fish as f32 / 15.0).clamp(0.0, 1.0),
-        (food.fruits as f32 / 15.0).clamp(0.0, 1.0),
-        (food.rodents as f32 / 15.0).clamp(0.0, 1.0),
-    ]
-    
-}
-
-fn vectorize_nest(nest: &Nest) -> Vec<f32> {
-    match nest {
-        Nest::Platform => vec![1.0, 0.0, 0.0, 0.0],
-        Nest::Bowl     => vec![0.0, 1.0, 0.0, 0.0],
-        Nest::Cavity   => vec![0.0, 0.0, 1.0, 0.0],
-        Nest::Ground   => vec![0.0, 0.0, 0.0, 1.0],
-        Nest::Wild     => vec![1.0, 1.0, 1.0, 1.0],
-        Nest::None     => vec![0.0, 0.0, 0.0, 0.0],
-    }
-}
-
-fn vectorize_niche(niche: &Niche) -> Vec<f32> {
-    match niche {
-        Niche::None     => vec![0.0, 0.0],
-        Niche::Predator => vec![1.0, 0.0],
-        Niche::Flocking => vec![0.0, 1.0],
-        Niche::Any      => vec![1.0, 1.0],
-    }
-}
-
-fn vectorize_trigger(trigger: &Trigger) -> Vec<f32> {
-    let mut v = Vec::<f32>::new();
-    match trigger {
-        Trigger::LayEgg => {
-            v.push(1.0);
-            v.extend(vec![0.0; 3]);
-            v.extend(vec![0.0; 5]);
-            v.push(0.0);
-        },
-        Trigger::PlayBird(habitat) => {
-            v.push(0.0);
-            v.extend(vectorize_habitat_collection(&habitat.clone().into()));
-            v.extend(vec![0.0; 5]);
-            v.push(0.0);
-        },
-        Trigger::GainFood(food) => {
-            v.push(0.0);
-            v.extend(vec![0.0; 3]);
-            v.extend(vectorize_food_constraint(&food.clone().into()));
-            v.push(0.0);
-        },
-        Trigger::HuntSuccess => {
-            v.push(0.0);
-            v.extend(vec![0.0; 3]);
-            v.extend(vec![0.0; 5]);
-            v.push(1.0);
-        },
-    }
-    v
-}
-
-fn vectorize_activation(activation: &Activation) -> Vec<f32> {
-    let mut v = Vec::<f32>::new();
-    match activation {
-        Activation::None => {
-            v.extend(vec![0.0, 0.0, 0.0]);
-            v.extend(vec![0.0; 10]);
-            v.extend(vec![0.0; 36]);
-        },
-        Activation::WhenActivated(power) => {
-            v.extend(vec![1.0, 0.0, 0.0]);
-            v.extend(vec![0.0; 10]);
-            v.extend(vectorize_power(power));
-        },
-        Activation::OnceBetweenTurns(trigger, power) => {
-            v.extend(vec![0.0, 1.0, 0.0]);
-            v.extend(vectorize_trigger(trigger));
-            v.extend(vectorize_power(power));
-        },
-        Activation::WhenPlayed(power) => {
-            v.extend(vec![0.0, 0.0, 1.0]);
-            v.extend(vec![0.0; 10]);
-            v.extend(vectorize_power(power));
-        },
-    }
-    v
-}
-
-/// Length of a vectorized bird
-const BIRD_DIM: usize = 108;
-
-fn vectorize_bird(bird: &Bird) -> Vec<f32> {
-    let mut v = Vec::<f32>::new();
-    v.extend(vectorize_cost(&bird.cost));
-    v.push(bird.points as f32 / 9.0);
-    v.extend(vectorize_niche(&bird.niche));
-    v.extend(vectorize_habitat_collection(&bird.habitat));
-    v.extend(vectorize_nest(&bird.nest));
-    v.push(bird.egg_limit as f32 / 6.0);
-    v.extend(vectorize_activation(&bird.power));
-    if let Some(power) = bird.shared_power {
-        v.extend(vectorize_power(&power))
-    } else {
-        v.extend(vec![0.0; 36])
-    }
-    debug_assert_eq!(v.len(), BIRD_DIM);
-    v
-}
-
-/// One vector per card; the network pools these with attention
-fn vectorize_hand(hand: &Vec<&'static Bird>) -> Hand {
-    hand.iter().map(|bird| vectorize_bird(bird)).collect()
-}
-
-/// Length of a vectorized bird slot, including the occupied flag
-const BIRD_SLOT_DIM: usize = 1 + BIRD_DIM + 2;
-
-fn vectorize_bird_slot(slot: &BirdSlot) -> Vec<f32> {
-    let mut v = Vec::<f32>::new();
-    v.push(1.0);
-    v.extend(vectorize_bird(slot.bird));
-    v.push(slot.eggs() as f32 / 6.0);
-    v.push((slot.bird.egg_limit - slot.eggs()) as f32 / 6.0);
-    v
-}
-
-fn vectorize_position(player: &Player) -> Vec<f32> {
-    let mut v = Vec::<f32>::new();
-    match player.activating() {
-        Position::Triggers => v.extend(vec![0.0; 8]),
-        Position::Played(h) => {
-            v.extend(vectorize_habitat_collection(&h.clone().into()));
-            match player.habitat(*h).len() {
-                1 => v.extend(vec![1.0, 0.0, 0.0, 0.0, 0.0]),
-                2 => v.extend(vec![0.0, 1.0, 0.0, 0.0, 0.0]),
-                3 => v.extend(vec![0.0, 0.0, 1.0, 0.0, 0.0]),
-                4 => v.extend(vec![0.0, 0.0, 0.0, 1.0, 0.0]),
-                5 => v.extend(vec![0.0, 0.0, 0.0, 0.0, 1.0]),
-                _ => unreachable!("invalid index")
-            }
-        },
-        Position::Chain((h, i)) => {
-            v.extend(vectorize_habitat_collection(&h.clone().into()));
-            match i {
-                0 => v.extend(vec![1.0, 0.0, 0.0, 0.0, 0.0]),
-                1 => v.extend(vec![0.0, 1.0, 0.0, 0.0, 0.0]),
-                2 => v.extend(vec![0.0, 0.0, 1.0, 0.0, 0.0]),
-                3 => v.extend(vec![0.0, 0.0, 0.0, 1.0, 0.0]),
-                4 => v.extend(vec![0.0, 0.0, 0.0, 0.0, 1.0]),
-                _ => unreachable!("invalid index")
-            }
-        },
-    }
-    v
-}
-
-/// Returns the board vector and the per-card hand vectors
-fn vectorize_player(player: &Player) -> (Board, Hand) { 
-    let mut v = Vec::<f32>::new();
-    for h in HABITATS { for i in 0..5 {
-        if let Some(s) = player.habitat(h).get(i) {
-            v.extend(vectorize_bird_slot(s));
-        } else {
-            v.extend(vec![0.0; BIRD_SLOT_DIM])
-        }
-    }}
-    v.extend(vectorize_food_supply(&player.food()));
-    v.extend(vectorize_habitat_collection(&player.fewest_birds()));
-    v.push((player.hand().len() as f32 / 30.0).clamp(0.0, 1.0));
-    v.push(player.bonus_cards()
-        .iter()
-        .map(|&b| b.score(player))
-        .sum::<usize>() 
-        as f32 / 80.0
-    );
-    let total_remaining_turns = player.total_remaining_turns();    
-    v.extend(player.goals()
-        .iter()
-        .zip([18, 11, 5, 0])
-        .map(|(&g, t)| if total_remaining_turns > t { 
-            g.score(player) as f32 / 5.0 
-        } else { 0.0 })
-    );
-    v.extend(vectorize_position(player));
-    for turn in 1..=26 { v.push(if turn == total_remaining_turns { 1.0 } else { 0.0 }); }
-    (v, vectorize_hand(player.hand()))
-}
-

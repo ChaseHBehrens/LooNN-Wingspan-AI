@@ -3,5 +3,8 @@ pub mod birds;
 pub mod bonuses;
 pub mod goals;
 pub mod simulation;
+#[cfg(feature = "terminal")]
 pub mod user_interface;
 pub mod evaluators;
+pub mod describe;
+pub mod session;

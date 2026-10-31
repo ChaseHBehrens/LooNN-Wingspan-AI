@@ -328,6 +328,24 @@ impl Player {
         rng: &mut impl RngExt,
         logged: bool,
     ) -> Result<Triggers, ScoringEvent> {
+        let (result, actions) = self.play_turn_recorded(
+            evaluator, feeder, bird_dealer, bonus_dealer, triggers, rng, logged
+        );
+        result.map(|()| Triggers::from(actions))
+    }
+
+    /// Like `play_turn`, but returns every action taken (including between-turn
+    /// triggers, even on a scoring event) instead of the triggers they cause
+    pub fn play_turn_recorded(
+        &mut self, 
+        evaluator: &mut impl Evaluator,
+        feeder: &mut impl Feeder,
+        bird_dealer: &mut impl BirdDealer,
+        bonus_dealer: &mut impl BonusDealer,
+        triggers: &Triggers,
+        rng: &mut impl RngExt,
+        logged: bool,
+    ) -> (Result<(), ScoringEvent>, Vec<Action>) {
         if logged { println!("\x1b[33m-\x1b[0m Running Triggers"); }
         let mut actions = Vec::<Action>::new();
         let trigger_actions = self.run_triggers(
@@ -340,7 +358,7 @@ impl Player {
             self.scored = true;
             self.accumulated_score += goal.score(&self);
             if self.total_remaining_turns != 0 {
-                return Err(ScoringEvent::EndOfRound);
+                return (Err(ScoringEvent::EndOfRound), actions);
             }
         } 
         self.scored = false;
@@ -350,7 +368,7 @@ impl Player {
             for bonus in self.bonus_cards.iter() {
                 self.accumulated_score += bonus.score(&self);
             }
-            return Err(ScoringEvent::EndOfGame);
+            return (Err(ScoringEvent::EndOfGame), actions);
         }
         if logged { println!("\x1b[33m-\x1b[0m Running Turn"); }
         let initial_actions = self.run_initial(
@@ -365,7 +383,7 @@ impl Player {
             evaluator, feeder, bird_dealer, bonus_dealer, logged
         )); 
         self.total_remaining_turns -= 1;
-        Ok(Triggers::from(actions))
+        (Ok(()), actions)
     }
 
     fn run_triggers(
@@ -455,12 +473,24 @@ impl Player {
             ) { options.push(option); }
         }
 
+        // Exploration: sometimes take a random kind of action (each kind equally
+        // likely, however many variants it has), still taking it the best way
+        if rng.random_range(0.0..1.0) < evaluator.random_action_rate() {
+            let mut kinds: Vec<_> = options.iter().map(|o| std::mem::discriminant(&o.0)).collect();
+            kinds.dedup();
+            if let Some(kind) = kinds.into_iter().choose(rng) {
+                options.retain(|o| std::mem::discriminant(&o.0) == kind);
+            }
+        }
         let best_option = options
             .into_iter()
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .expect("No Possible Actions");
         let best_option = best_option.0;
         let activation = best_option.activation();
+        // Gaining food records each food as it is taken from the feeder; the other
+        // actions were decided while evaluating options, so their result is recorded here
+        let record = !matches!(best_option, InitialOption::GainFood { .. });
         match best_option {
             InitialOption::PlayBird { player, play_bird } => {
                 *self = player;
@@ -500,7 +530,13 @@ impl Player {
             },
         }
         self.activating = activation;
+        if record { self.record(evaluator); }
         actions
+    }
+
+    /// Records the current state as one reached in play, for training
+    fn record(&self, evaluator: &mut impl Evaluator) {
+        let _ = evaluator.choose(std::iter::once(((), self.clone())), true);
     }
 
     fn evaluate_initial_play_bird(
@@ -578,7 +614,7 @@ impl Player {
             if let Some(bird) = player.choose_lay_egg(
                 evaluator, 
                 &possible_birds, 
-                true
+                false
             ) { birds.push(bird) }
         }
         if birds.is_empty() { return None; }
@@ -602,7 +638,7 @@ impl Player {
             .map(|_| {
                 let mut p = player.clone();
                 p.hand.extend(
-                    bird_dealer.deck().sample(rng, birds_drawn + 1)
+                    bird_dealer.deck().sample(rng, birds_drawn)
                 );
                 p
             })
@@ -894,6 +930,7 @@ impl Player {
         &mut self,
         evaluator: &mut impl Evaluator,
         cost: Cost,
+        played: bool,
     ) -> FoodCollection {
         // HACK: ignores spending 2 foods as a wild
         let options: Vec<(FoodCollection, Player)> = cost.payment_options()
@@ -912,7 +949,7 @@ impl Player {
                 (collection, p)
             })
             .collect();
-        let (collection, player) = evaluator.choose(options.into_iter(), true).unwrap();
+        let (collection, player) = evaluator.choose(options.into_iter(), played).unwrap();
         *self = player;
         collection
     }
@@ -946,7 +983,8 @@ impl Player {
                 for _ in 0..eggs_needed { 
                     e.push(p.choose_egg_to_discard(evaluator, false).unwrap());
                 }
-                let f = p.choose_bird_payment(evaluator, b.cost);
+                // Every candidate is evaluated; only the one chosen below is played
+                let f = p.choose_bird_payment(evaluator, b.cost, false);
                 (PlayBird { bird: b, food: f, eggs: e, habitat: h }, p)
             })
             .collect();

@@ -1,0 +1,51 @@
+# Publishes the standalone play page to GitHub Pages whenever a release is published.
+# One-time setup: Settings > Pages > Build and deployment > Source: GitHub Actions.
+name: Deploy play page
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust with the WebAssembly target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          curl -sSL "https://github.com/rustwasm/wasm-bindgen/releases/download/${version}/wasm-bindgen-${version}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin "wasm-bindgen-${version}-x86_64-unknown-linux-musl/wasm-bindgen"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the page
+        run: bash web/build.sh
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

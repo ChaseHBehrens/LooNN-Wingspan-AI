@@ -27,7 +27,14 @@ const HABITAT: HabitatCollection = HabitatCollection {
 
 const PLAY_BIRD: HabitatCollection = HabitatCollection::new();
 
-const FOOD_CONSTRAINT: FoodCollection = FoodCollection::new(); 
+const FOOD_CONSTRAINT: FoodCollection = FoodCollection {
+    invertebrates: 0,
+    seeds: 1,
+    fish: 0,
+    fruits: 0,
+    rodents: 0,
+    wilds: 0,
+}; 
 
 const POWER: Activation = Activation::WhenActivated(Power {
     play_bird_in_this_habitat: false,
@@ -36,7 +43,7 @@ const POWER: Activation = Activation::WhenActivated(Power {
     hunt_bird: None,
     food_constraint: FOOD_CONSTRAINT,
     hunt_dice: false,
-    feeder: false,
+    feeder: true,
     gain_food: 0,
     discard_food: false,
     self_constraint: false,

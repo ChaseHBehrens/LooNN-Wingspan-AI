@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "viewer",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-3.12", "viewer/server.py"],
+      "port": 8765
+    },
+    {
+      "name": "play",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["run", "--release", "--bin", "play"],
+      "port": 8766
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-3.12", "-m", "http.server", "-d", "site", "8767"],
+      "port": 8767
+    }
+  ]
+}

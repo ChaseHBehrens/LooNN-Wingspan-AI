@@ -21,6 +21,9 @@ pub trait Evaluator {
         players.iter().map(|p| self.evaluate(p)).collect()
     }
     
+    /// Chance of taking a random kind of action on a turn, for exploration in training
+    fn random_action_rate(&self) -> f32 { 0.0 }
+
     /// Chooses the predicted highest scoring player
     fn choose<T>(
         &mut self,
