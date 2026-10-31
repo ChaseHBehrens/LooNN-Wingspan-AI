@@ -1,47 +1,42 @@
-[Play with LooNN](https://chasehbehrens.github.io/LooNN-Wingspan-AI/)
+# Wingspan AI
+This project contains LooNN, a neural network based bot capable of playing the board game Wingspan.
 
-## Terminal version
+> ⚠️ **Disclaimer:** This project is an unofficial and independent AI implementation that is not affiliated with, endorsed by, or connected to Stonemaier Games, or any official creators or publishers of Wingspan.
 
-Play a real game of Wingspan with LooNN in one seat from your terminal: you enter the cards and dice that come out, LooNN prints its moves, and you make them on the table for it.
+## Usage
 
-### Download
+<div align="center">
 
-Get the build for your system from the [latest release](https://github.com/ChaseHBehrens/LooNN-Wingspan-AI/releases/latest), unpack it, and run `loonn-terminal` from a terminal:
+### Play in your browser
 
-| System | File |
-| --- | --- |
-| Windows | `loonn-terminal-windows-x86_64.zip` |
-| macOS (Apple Silicon) | `loonn-terminal-macos-arm64.tar.gz` |
-| macOS (Intel) | `loonn-terminal-macos-x86_64.tar.gz` |
-| Linux | `loonn-terminal-linux-x86_64.tar.gz` |
+[Run LooNN](https://chasehbehrens.github.io/LooNN-Wingspan-AI/)
 
-On macOS and Linux:
+<a href="https://chasehbehrens.github.io/LooNN-Wingspan-AI/"><img width="800" alt="The web version mid-game" src="https://github.com/user-attachments/assets/e23d38a4-8d32-45ab-9bb2-0555f10b1e20" /></a>
 
-```bash
-tar -xzf loonn-terminal-macos-arm64.tar.gz
-./loonn-terminal-macos-arm64/loonn-terminal
-```
+### Play in the terminal
+Download the **[latest release](https://github.com/ChaseHBehrens/LooNN-Wingspan-AI/releases/latest)** for Linux, Windows or macOS
 
-macOS blocks downloaded programs that aren't signed. If it says the program can't be opened, clear the download flag once:
+<img width="800" alt="The terminal version mid-game" src="" />
 
-```bash
-xattr -d com.apple.quarantine loonn-terminal-macos-arm64/loonn-terminal
-```
+</div>
 
-### Run from source
+## About 
+// TODO: Wingspan game explanation
 
-With [Rust](https://rustup.rs) installed:
 
-```bash
-cargo run --release --no-default-features --features terminal --bin terminal
-```
+// TODO: about network
 
-`cargo run --release --bin terminal` works too, but it also builds the PyTorch bridge, which needs Python 3.12 with PyTorch. That build accepts `--pytorch` to use the training checkpoint directly instead of the exported network in `web/model.bin`.
+Claude Opus 5.5 was used to generate code in X areas of the project
+- 
 
-### Playing
+## Performance
+// TODO: diagram from training
 
-- **Setup:** pick the 4 round goals, then the 5 birds and 2 bonus cards dealt to LooNN. Type to search the lists.
-- **Each turn:** once the other players have gone, tick anything they did that LooNN's birds react to, then press Enter. LooNN asks for whatever it needs: the dice in the birdfeeder, the face-up birds, or the card drawn from the deck.
-- **Dice:** type them separated by spaces: `i` invertebrate, `s` seed, `f` fish, `fr` fruit, `r` rodent, `is` invertebrate/seed.
-- **LooNN's moves** are printed after each turn, followed by its board, score, and predicted final score.
-- Press Esc or Ctrl+C to quit.
+## Limitations
+
+
+## Improvements
+
+
+
+
