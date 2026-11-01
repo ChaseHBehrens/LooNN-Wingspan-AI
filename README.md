@@ -59,7 +59,8 @@ Its averages 68.6 points per game with a standard deviation of 10.8 points.
 For reference this about the same level as me, someone who has played a couple of games and is not particularly good. 
 While this network is not capable of superhuman performance, I am very happy with the results given the complexity of the game. 
 
-// TODO: diagram from training
+<img width="1600" height="800" alt="image" src="https://github.com/user-attachments/assets/96122aa1-c032-4ed9-9024-b65032ecc1fc" />
+
 
 ## Limitations
 This implementation resolves all powers triggered between turns at the start of a players turn for simplicity. 
