@@ -1,9 +1,13 @@
-//! Local server for the play page (play/index.html), with LooNN choosing moves
-//! through the PyTorch network. The same page also runs in the browser on its own
-//! (see web/), with the network exported to Rust.
+//! Local server for the play page (play/index.html). The same page also runs in
+//! the browser on its own (see web/).
 //!
-//! Usage: cargo run --release --bin play   then open http://localhost:8766
+//! Usage: cargo run --release --bin play [--pytorch]   then open http://localhost:8766
 //! (set PORT to use another port)
+//!
+//! LooNN uses the network exported to web/model.bin (run
+//! neural_network/export_weights.py after training), as the browser and terminal
+//! versions do. --pytorch uses the PyTorch checkpoint directly instead, which needs
+//! the `python` feature, and starts untrained if there is no checkpoint.
 
 use std::fs;
 use std::io::{ self, BufRead, BufReader, Read, Write };
@@ -14,13 +18,15 @@ use std::sync::{ Arc, Mutex };
 use std::thread;
 use rand::random;
 use loonn::describe::esc;
-use loonn::evaluators::LooNN;
+use loonn::core::Evaluator;
+use loonn::evaluators::{ NativeLooNN, Network };
 use loonn::session::{ catalog, Session };
 
 const PORT: u16 = 8766;
 /// Read on every request so the page can be edited without rebuilding
 const PAGE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/play/index.html");
-const IMAGES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/play");
+const FAVICON: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/play/favicon.png");
+const WEIGHTS: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/web/model.bin"));
 
 enum Command {
     Answer(u64, Vec<String>),
@@ -35,14 +41,12 @@ fn panic_text(e: &Box<dyn std::any::Any + Send>) -> String {
 
 /// Runs the game on its own thread, since the network lives there, publishing
 /// the state JSON after every command
-fn run_game(state: Arc<Mutex<String>>) -> Sender<Command> {
+fn run_game<E: Evaluator>(state: Arc<Mutex<String>>, load: impl FnOnce() -> (E, E) + Send + 'static) -> Sender<Command> {
     let (sender, commands) = channel();
     thread::spawn(move || {
         let publish = |json: String| *state.lock().unwrap() = json;
         publish("{\"seq\":0,\"prompt\":null,\"view\":{\"status\":\"Loading LooNN's network…\",\"player\":null,\"predicted\":null,\"log\":[]}}".into());
-        let chooser = LooNN::new().expect("Failed to construct LooNN");
-        // Predicts LooNN's final score without the bonus it adds per bird when choosing
-        let predictor = LooNN::with_bird_bonus(0.0).expect("Failed to construct LooNN");
+        let (chooser, predictor) = load();
         let mut session = Session::new(chooser, predictor, random());
         publish(session.state_json());
         // Error prompts get their own seqs, past any the session will reach soon
@@ -83,8 +87,8 @@ fn handle(stream: TcpStream, state: &Mutex<String>, commands: &Mutex<Sender<Comm
     reader.read_exact(&mut body)?;
     let body = String::from_utf8_lossy(&body);
 
-    // Images aren't text, so they skip the responses below
-    if method == "GET" && matches!(path, "/logo.png" | "/favicon.png") && let Ok(image) = fs::read(format!("{IMAGES}{path}")) {
+    // An image isn't text, so it skips the responses below
+    if method == "GET" && path == "/favicon.png" && let Ok(image) = fs::read(FAVICON) {
         write!(
             &stream,
             "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
@@ -126,9 +130,32 @@ fn handle(stream: TcpStream, state: &Mutex<String>, commands: &Mutex<Sender<Comm
     )
 }
 
+fn start_game(state: Arc<Mutex<String>>) -> Sender<Command> {
+    if std::env::args().any(|a| a == "--pytorch") {
+        #[cfg(feature = "python")]
+        {
+            use loonn::evaluators::LooNN;
+            return run_game(state, || (
+                LooNN::new().expect("Failed to construct LooNN"),
+                // Predicts LooNN's final score without the bonus it adds per bird when choosing
+                LooNN::with_bird_bonus(0.0).expect("Failed to construct LooNN"),
+            ));
+        }
+        #[cfg(not(feature = "python"))]
+        {
+            eprintln!("This build doesn't include PyTorch support; run from source to use --pytorch.");
+            std::process::exit(1);
+        }
+    }
+    run_game(state, || {
+        let network = Arc::new(Network::from_bytes(WEIGHTS).expect("Bad weights file"));
+        (NativeLooNN::new(network.clone()), NativeLooNN::predictor(network))
+    })
+}
+
 fn main() {
     let state = Arc::new(Mutex::new(String::new()));
-    let commands = Arc::new(Mutex::new(run_game(state.clone())));
+    let commands = Arc::new(Mutex::new(start_game(state.clone())));
     let catalog = Arc::new(catalog());
     let port = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(PORT);
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("Could not open the port");

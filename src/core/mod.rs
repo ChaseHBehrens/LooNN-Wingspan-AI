@@ -24,6 +24,12 @@ pub trait Evaluator {
     /// Chance of taking a random kind of action on a turn, for exploration in training
     fn random_action_rate(&self) -> f32 { 0.0 }
 
+    /// Called with each action of a turn as it happens, for showing a game in progress
+    fn on_action(&mut self, _action: &Action) { }
+
+    /// Called as a bird's power starts running, before it's known to have any result
+    fn on_activate(&mut self, _bird: &'static Bird) { }
+
     /// Chooses the predicted highest scoring player
     fn choose<T>(
         &mut self,

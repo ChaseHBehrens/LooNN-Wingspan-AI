@@ -7,7 +7,8 @@
 //! a question that hasn't been answered yet, the dealers hand it placeholders, the
 //! network is skipped for the rest of that pass, and the result is thrown away; the
 //! question is shown instead. Network results are cached, so replaying a step after
-//! each answer only computes what is new.
+//! each answer only computes what is new. What LooNN did before the question is kept,
+//! so it can be made on the table first.
 
 use std::cell::{ Cell, RefCell };
 use std::collections::hash_map::DefaultHasher;
@@ -345,9 +346,19 @@ struct Memo<E> {
     inner: E,
     answers: Rc<Answers>,
     cache: HashMap<u64, f32>,
+    /// What LooNN has done so far in the step, up to the question it's waiting on
+    moves: Vec<String>,
+    /// A bird whose power has started but hasn't done anything yet
+    activating: Option<&'static Bird>,
 }
 
 impl<E: Evaluator> Memo<E> {
+    /// The moves so far, with a power that was running when the question came up
+    fn moves_so_far(&self) -> Vec<String> {
+        let activating = self.activating.iter().map(|b| Action::Activate(b).to_string());
+        self.moves.iter().cloned().chain(activating).collect()
+    }
+
     fn key(player: &Player) -> u64 {
         let (board, hand) = vectorize_player(player);
         let mut h = DefaultHasher::new();
@@ -359,6 +370,16 @@ impl<E: Evaluator> Memo<E> {
 }
 
 impl<E: Evaluator> Evaluator for Memo<E> {
+    fn on_action(&mut self, action: &Action) {
+        if self.answers.waiting() { return; }
+        if let Some(bird) = self.activating.take() { self.moves.push(Action::Activate(bird).to_string()); }
+        self.moves.extend(action.to_string().lines().map(String::from));
+    }
+
+    fn on_activate(&mut self, bird: &'static Bird) {
+        if !self.answers.waiting() { self.activating = Some(bird); }
+    }
+
     fn evaluate(&mut self, player: &Player) -> f32 {
         self.evaluate_all(std::slice::from_ref(player))[0]
     }
@@ -472,6 +493,8 @@ pub struct Session<E: Evaluator> {
     step: u64,
     /// Bumped with every new prompt, so an answer to an old one is ignored
     seq: u64,
+    /// What LooNN has done so far in the step that's waiting on the prompt
+    pending: Vec<String>,
     prompt: Prompt,
 }
 
@@ -480,7 +503,7 @@ impl<E: Evaluator> Session<E> {
     pub fn new(chooser: E, predictor: E, seed: u64) -> Self {
         let answers = Rc::new(Answers::default());
         let mut session = Self {
-            chooser: Memo { inner: chooser, answers: answers.clone(), cache: HashMap::new() },
+            chooser: Memo { inner: chooser, answers: answers.clone(), cache: HashMap::new(), moves: Vec::new(), activating: None },
             predictor,
             answers,
             stage: Stage::Setup,
@@ -492,6 +515,7 @@ impl<E: Evaluator> Session<E> {
             seed,
             step: 0,
             seq: 0,
+            pending: Vec::new(),
             prompt: Prompt::new(PromptKind::Over, "", &None),
         };
         session.run();
@@ -534,6 +558,9 @@ impl<E: Evaluator> Session<E> {
     /// LooNN's moves so far, oldest first
     pub fn log(&self) -> &[Entry] { &self.log }
 
+    /// LooNN's moves in the step that's waiting on the prompt, which join the log once it's done
+    pub fn pending(&self) -> &[String] { &self.pending }
+
     /// LooNN's predicted final score (its actual score once the game is over)
     pub fn predicted(&mut self) -> Option<f32> {
         let player = self.player.as_ref()?;
@@ -562,7 +589,7 @@ impl<E: Evaluator> Session<E> {
         };
         let player = self.player.as_ref().map(player_json).unwrap_or_else(|| "null".into());
         let log = json_list(&self.log, |e| format!("{{\"title\":{},\"lines\":{}}}", esc(&e.title), json_list(&e.lines, |l| esc(l))));
-        format!("{{\"status\":{},\"player\":{player},\"predicted\":{predicted},\"log\":{log}}}", esc(status))
+        format!("{{\"status\":{},\"player\":{player},\"predicted\":{predicted},\"log\":{log},\"pending\":{}}}", esc(status), json_list(&self.pending, |l| esc(l)))
     }
 
     /// Replays steps with the answers given until one waits on a question
@@ -570,6 +597,9 @@ impl<E: Evaluator> Session<E> {
         loop {
             self.answers.next.set(0);
             *self.answers.missing.borrow_mut() = None;
+            self.chooser.moves.clear();
+            self.chooser.activating = None;
+            self.pending.clear();
             let outcome = match self.stage {
                 Stage::Setup => self.run_setup(),
                 Stage::Turn => self.run_turn(),
@@ -582,6 +612,7 @@ impl<E: Evaluator> Session<E> {
             if let Some(missing) = self.answers.missing.borrow_mut().take() {
                 self.seq += 1;
                 self.prompt = missing;
+                self.pending = self.chooser.moves_so_far();
                 return;
             }
             let Some(outcome) = outcome else { unreachable!("a step stopped without a question") };
@@ -725,7 +756,9 @@ impl<E: Evaluator> Session<E> {
                 }
                 Err(ScoringEvent::EndOfRound) => {
                     let round = ROUND_ENDS.iter().position(|&t| t == turns_left).unwrap_or(0);
-                    lines.push(format!("Scored {gained} points for the round goal ({})", goals[round].name));
+                    let scored = format!("Scored {gained} points for the round goal ({})", goals[round].name);
+                    self.chooser.moves.push(scored.clone());
+                    lines.push(scored);
                     entries.push(Entry { title: format!("End of round {}", round + 1), lines });
                     // The tray is cleared at the end of each round
                     deck.tray = None;

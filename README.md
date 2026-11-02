@@ -1,5 +1,5 @@
 <p align="center">
-    <img width="320" alt="LooNN logo" src="play/logo.png" />
+    <img width="320" alt="LooNN logo" src="logo.svg" />
 </p>
 
 # Wingspan AI

@@ -12,8 +12,23 @@ fn habitat_color(habitat: Habitat) -> &'static str {
     }
 }
 
-fn list(items: Vec<String>) -> String {
-    if items.is_empty() { format!("{DIM}none{RESET}") } else { items.join(", ") }
+/// A heading with one item per line below it
+fn section(title: &str, items: Vec<String>, empty: &str) {
+    println!("\n  {title}{RESET}");
+    if items.is_empty() { println!("    {DIM}{empty}{RESET}"); }
+    for item in items { println!("    {item}"); }
+}
+
+/// Each food held with how many, like "fish: 3"
+fn food_counts(player: &Player) -> Vec<String> {
+    let mut counts = Vec::<(&str, usize)>::new();
+    for food in food_list(&player.food()) {
+        match counts.last_mut() {
+            Some((name, n)) if *name == food => *n += 1,
+            _ => counts.push((food, 1)),
+        }
+    }
+    counts.into_iter().map(|(food, n)| format!("{food}: {n}")).collect()
 }
 
 pub fn print(player: &Player, predicted: Option<f32>) {
@@ -23,18 +38,18 @@ pub fn print(player: &Player, predicted: Option<f32>) {
         player.accumulated_score(), player.total_remaining_turns(),
     );
     for h in HABITATS {
-        let birds: Vec<String> = player.habitat(h).iter().map(|s| {
+        let birds = player.habitat(h).iter().map(|s| {
             let eggs = "●".repeat(s.eggs() as usize) + &"○".repeat(s.bird.egg_limit.saturating_sub(s.eggs()) as usize);
             format!("{} {DIM}{}pt{RESET} {eggs}", s.bird.name, s.bird.points)
         }).collect();
         let name = h.to_string();
-        println!("  {}{name:<10}{RESET}{}", habitat_color(h), if birds.is_empty() { format!("{DIM}empty{RESET}") } else { birds.join("  │  ") });
+        section(&format!("{}{}{}", habitat_color(h), name[..1].to_uppercase(), &name[1..]), birds, "empty");
     }
-    println!("  {BOLD}Food{RESET}      {}", list(food_list(&player.food()).into_iter().map(String::from).collect()));
-    println!("  {BOLD}Hand{RESET}      {}", list(player.hand().iter().map(|b| format!("{} {DIM}{}pt{RESET}", b.name, b.points)).collect()));
-    println!("  {BOLD}Bonus{RESET}     {}", list(player.bonus_cards().iter().map(|b| format!("{} {DIM}({} now){RESET}", b.name, b.score(player))).collect()));
-    let goals: Vec<String> = player.goals().iter().enumerate()
-        .map(|(i, g)| format!("R{} {} {DIM}({} now){RESET}", i + 1, g.name, g.score(player)))
+    section(&format!("{BOLD}Food"), food_counts(player), "none");
+    section(&format!("{BOLD}Hand"), player.hand().iter().map(|b| format!("{} {DIM}{}pt{RESET}", b.name, b.points)).collect(), "none");
+    section(&format!("{BOLD}Bonus"), player.bonus_cards().iter().map(|b| format!("{} {DIM}({} now){RESET}", b.name, b.score(player))).collect(), "none");
+    let goals = player.goals().iter().enumerate()
+        .map(|(i, g)| format!("Round {}: {} {DIM}({} now){RESET}", i + 1, g.name, g.score(player)))
         .collect();
-    println!("  {BOLD}Goals{RESET}     {}", goals.join(" · "));
+    section(&format!("{BOLD}Goals"), goals, "none");
 }

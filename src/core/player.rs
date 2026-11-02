@@ -13,6 +13,15 @@ use super::{
     Evaluator,
 };
 
+/// Adds an action to a list and tells the evaluator as it happens
+macro_rules! note {
+    ($evaluator:ident, $actions:ident, $action:expr) => {{
+        let action = $action;
+        $evaluator.on_action(&action);
+        $actions.push(action);
+    }};
+}
+
 /// Random rollouts averaged when evaluating the gain food and draw birds actions
 const LOOKAHEAD_SAMPLES: usize = 20;
 
@@ -491,18 +500,19 @@ impl Player {
         // Gaining food records each food as it is taken from the feeder; the other
         // actions were decided while evaluating options, so their result is recorded here
         let record = !matches!(best_option, InitialOption::GainFood { .. });
+        note!(evaluator, actions, Action::PlaceCube(best_option.habitat()));
         match best_option {
             InitialOption::PlayBird { player, play_bird } => {
                 *self = player;
-                actions.push(Action::PlayBird(play_bird));
+                note!(evaluator, actions, Action::PlayBird(play_bird));
             }
             InitialOption::GainFood { player, discard_bird, food_gained } => {
                 *self = player;
                 if let Some(bird) = discard_bird {
-                    actions.push(Action::DiscardBird(bird))
+                    note!(evaluator, actions, Action::DiscardBird(bird))
                 }
                 for _ in 0..food_gained {
-                    actions.push(Action::InitialGainFood(
+                    note!(evaluator, actions, Action::InitialGainFood(
                         self.choose_from_feeder(evaluator, FoodCollection::all(), feeder)
                             .unwrap_or_else(|| unreachable!())
                     ));
@@ -511,19 +521,19 @@ impl Player {
             InitialOption::LayEggs { player, discard_food, birds } => {
                 *self = player;
                 if let Some(food) = discard_food {
-                    actions.push(Action::DiscardFood(food))
+                    note!(evaluator, actions, Action::DiscardFood(food))
                 }
                 for bird in birds {
-                    actions.push(Action::InitialLayEgg(bird))
+                    note!(evaluator, actions, Action::InitialLayEgg(bird))
                 }
             },
             InitialOption::DrawBirds { player, discard_egg, birds_drawn } => {
                 *self = player;
                 if let Some(bird) = discard_egg {
-                    actions.push(Action::DiscardEgg(bird))
+                    note!(evaluator, actions, Action::DiscardEgg(bird))
                 }
                 for _ in 0..birds_drawn {
-                    actions.push(Action::DrawBird(
+                    note!(evaluator, actions, Action::DrawBird(
                         self.choose_bird_to_draw(evaluator, bird_dealer)
                     ));
                 }
@@ -665,6 +675,7 @@ impl Player {
                 self.activating = next(habitat, i);
                 continue;
             }; 
+            evaluator.on_activate(active_bird);
             if let Some(a) = self.run_power(evaluator, feeder, bird_dealer, bonus_dealer, power) {
                 let mut bird_actions = vec![Action::Activate(active_bird)];
                 if logged { println!("{}", bird_actions[0]); }
@@ -696,6 +707,7 @@ impl Player {
                 self.activating = Position::Triggers;
                 continue;
             }; 
+            evaluator.on_activate(active_bird);
             let Some(a) = self.run_power(
                 evaluator, feeder, bird_dealer, bonus_dealer, power
             ) else {
@@ -733,105 +745,105 @@ impl Player {
         }
         if power.hunt_dice {
             if !feeder.hunt().contains(power.food_constraint.into()) { return None; }
-            actions.push(Action::HuntSuccess);
+            note!(evaluator, actions, Action::HuntSuccess);
         }
         if let Some(wingspan) = power.hunt_bird {
             let b = bird_dealer.draw_from_deck();
             bird_dealer.discard(b);
             if !(b.wingspan < wingspan) { return None; }
-            actions.push(Action::HuntSuccess);
+            note!(evaluator, actions, Action::HuntSuccess);
         }
         if power.discard_egg { 
-            actions.push(Action::DiscardEgg(
+            note!(evaluator, actions, Action::DiscardEgg(
                 self.choose_egg_to_discard(evaluator, true)? 
             ));
         }
         if power.discard_food {
             match power.food_constraint.into() {
-                Food::Wild => actions.push(Action::DiscardFood(
+                Food::Wild => note!(evaluator, actions, Action::DiscardFood(
                     self.choose_food_to_discard(evaluator, true)?
                 )),
                 food => if self.food.contains(food.into()) { 
                     self.food -= food;
-                    actions.push(Action::DiscardFood(food));
+                    note!(evaluator, actions, Action::DiscardFood(food));
                 } else { return None },
             }
         }
         if power.discard_bird && (power.tuck_or_cache > 0) {
-            actions.push(Action::DiscardBird(
+            note!(evaluator, actions, Action::DiscardBird(
                 self.choose_bird_to_discard(evaluator, true)?
             ));
         }
         for _ in 0..power.draw_bird { 
             match (power.deck_constraint, power.face_up_constraint) {
                 (true, true) => { 
-                    actions.push(Action::DrawBird(
+                    note!(evaluator, actions, Action::DrawBird(
                         self.choose_bird_to_draw(evaluator, bird_dealer)
                     ));
                 },
                 (true, false) => { 
                     let bird = bird_dealer.draw_from_deck();
                     self.hand.push(bird);
-                    actions.push(Action::DrawBird(bird));
+                    note!(evaluator, actions, Action::DrawBird(bird));
                 },
                 (false, true) => {
                     if let Some(bird) = self.choose_bird_to_draw_from_face_up(evaluator, bird_dealer) {
-                        actions.push(Action::DrawBird(bird));
+                        note!(evaluator, actions, Action::DrawBird(bird));
                     } else { return Some(actions) }
                 },
                 (false, false) => (),
             }
         }
         if power.discard_bird && (power.tuck_or_cache == 0) {
-            actions.push( Action::DiscardBird(
+            note!(evaluator, actions, Action::DiscardBird(
                 self.choose_bird_to_discard(evaluator, true)?
             ));
         }
         for _ in 0..power.lay_eggs {
             let birds = self.egg_targets(power);
             if let Some(bird) = self.choose_lay_egg(evaluator, &birds, true) {
-                actions.push(Action::LayEgg(bird));
+                note!(evaluator, actions, Action::LayEgg(bird));
             } else { return Some(actions); }
         }
         if power.lay_eggs_on_all {
             for bird in self.egg_targets(power) {
                 self.lay_egg(bird);
-                actions.push(Action::LayEgg(bird));
+                note!(evaluator, actions, Action::LayEgg(bird));
             }
         }
         let mut reroll = true;
         for _ in 0..power.gain_food { match (power.feeder, reroll) {
             (true, true) => {
                 if let Some(food) = self.choose_from_feeder(evaluator, power.food_constraint, feeder) {
-                    actions.push(Action::GainFood(food));
+                    note!(evaluator, actions, Action::GainFood(food));
                 } else { return Some(actions); }
                 reroll = false;
             },
             (true, false) => {
                 if let Some(food) = self.choose_from_feeder_no_reroll(evaluator, power.food_constraint, feeder) {
-                    actions.push(Action::GainFood(food));
+                    note!(evaluator, actions, Action::GainFood(food));
                 } else { return Some(actions); }
                 reroll = false;
             },
             _ => {
-                actions.push(Action::GainFood(
+                note!(evaluator, actions, Action::GainFood(
                     self.choose_food_to_draw(evaluator, power.food_constraint, true)
                 ));
             },
         }}
         if power.migration { 
-            actions.push(Action::Migrate(
+            note!(evaluator, actions, Action::Migrate(
                 self.choose_migration(evaluator)?
             ));
         }
         if power.play_bird != HabitatCollection::new() {
-            actions.push(Action::PlayBird(
+            note!(evaluator, actions, Action::PlayBird(
                 self.choose_bird_to_play(evaluator, power.play_bird, true)?
             ));
         }
         if power.play_bird_in_this_habitat {
             let habitat = self.active_habitat().expect("No active habitat").into();
-            actions.push(Action::PlayBird(
+            note!(evaluator, actions, Action::PlayBird(
                 self.choose_bird_to_play(evaluator, habitat, true)?
             ));
         }
@@ -840,7 +852,7 @@ impl Player {
                 return None;
             }
             self.accumulated_score += power.tuck_or_cache as usize;
-            actions.push(Action::TuckOrCache(power.tuck_or_cache));
+            note!(evaluator, actions, Action::TuckOrCache(power.tuck_or_cache));
         }
         if let Some(niche) = power.repeat_power {
             let habitat = self.active_habitat().expect("No active habitat").into();
@@ -855,7 +867,7 @@ impl Player {
                 .collect();
             let Some(bird) = self.choose_repeat_power(&birds)
             else { return Some(actions) };
-            actions.push(Action::Activate(bird));
+            note!(evaluator, actions, Action::Activate(bird));
             let Activation::WhenActivated(power) = bird.power
             else { unreachable!() };
             if let Some(a) = self.run_power(
@@ -867,7 +879,7 @@ impl Player {
             ) { actions.extend(a); }
         }
         if power.draw_bonus {
-            actions.push(Action::DrawBonusCard(
+            note!(evaluator, actions, Action::DrawBonusCard(
                 self.choose_bonus_card(evaluator, bonus_dealer)
             ));
         }
@@ -1218,6 +1230,16 @@ enum InitialOption {
 } 
 
 impl InitialOption {
+    /// The habitat row the action cube goes on, or `None` for the play a bird row
+    fn habitat(&self) -> Option<Habitat> {
+        match self {
+            Self::PlayBird { .. } => None,
+            Self::GainFood { .. } => Some(Habitat::Forest),
+            Self::LayEggs { .. } => Some(Habitat::Grassland),
+            Self::DrawBirds { .. } => Some(Habitat::Wetland),
+        }
+    }
+
     fn activation(&self) -> Position {
         match self {
             InitialOption::PlayBird { player:_, play_bird } => 

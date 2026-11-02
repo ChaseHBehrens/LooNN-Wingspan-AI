@@ -17,6 +17,8 @@ pub enum Action {
     HuntSuccess,
     InitialGainFood(Food),
     InitialLayEgg(&'static Bird),
+    /// The cube for a turn's main action: on a habitat's row, or on the play a bird row
+    PlaceCube(Option<Habitat>),
 }
 
 #[derive(Clone)]
@@ -70,6 +72,8 @@ impl Display for Action {
             Action::HuntSuccess => write!(f, "Hunt succeeded"),
             Action::InitialGainFood(food) => write!(f, "Gain {}", food),
             Action::InitialLayEgg(bird) => write!(f, "Lay an egg on {}", bird),
+            Action::PlaceCube(Some(habitat)) => write!(f, "Put an action cube on {}", habitat),
+            Action::PlaceCube(None) => write!(f, "Put an action cube on Play bird"),
         }
     }
 }
