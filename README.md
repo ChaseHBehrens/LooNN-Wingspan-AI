@@ -1,8 +1,7 @@
 <p align="center">
     <img width="320" alt="LooNN logo" src="logo.svg" />
 </p>
-
-# Wingspan AI
+-
 This project contains LooNN, a neural network based bot capable of playing the board game Wingspan.
 
 > ⚠️ **Disclaimer:** This project is an unofficial and independent AI implementation that is not affiliated with, 
@@ -18,8 +17,9 @@ endorsed by, or connected to Stonemaier Games, or any official creators or publi
 
 <a href="https://chasehbehrens.github.io/LooNN-Wingspan-AI/">
 <img 
-    width="800" alt="The web version mid-game" 
-    src="https://github.com/user-attachments/assets/e23d38a4-8d32-45ab-9bb2-0555f10b1e20" 
+    width="800" 
+    alt="image" 
+    src="https://github.com/user-attachments/assets/19c304e5-d915-4949-b935-f68d692d3401" 
 />
 </a>
 
