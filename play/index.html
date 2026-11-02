@@ -4,23 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Play with LooNN</title>
+<link rel="icon" type="image/png" href="favicon.png">
 <style>
   :root {
-    --bg: #f6f5f1; --panel: #ffffff; --ink: #1f2328; --muted: #6b7078; --line: #e2e0d8;
-    --accent: #2f6f5e; --accent-ink: #ffffff; --warn: #b42318; --highlight: #fff7d6;
+    --bg: #f4f5f6; --panel: #ffffff; --ink: #1b1e22; --muted: #61666e; --line: #e1e3e6;
+    --accent: #c43034; --accent-ink: #ffffff; --warn: #b45309; --highlight: #fbeeee;
     --forest: #e3efe0; --grassland: #f6efd2; --wetland: #dfeaf3;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16181b; --panel: #1f2226; --ink: #e6e6e3; --muted: #9a9ea5; --line: #33373d;
-      --accent: #5fb39a; --accent-ink: #0d1411; --warn: #f97066; --highlight: #3a3420;
+      --bg: #121416; --panel: #1b1e22; --ink: #ececec; --muted: #9ea3aa; --line: #30343a;
+      --accent: #e8595c; --accent-ink: #190a0b; --warn: #f5a524; --highlight: #361b1d;
       --forest: #1f3024; --grassland: #34301c; --wetland: #1c2b37;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 18px; margin: 0; }
+  header h1 { display: flex; align-items: center; gap: 10px; font-size: 18px; margin: 0; }
+  /* The logo is black on white, so it keeps its white background in dark mode */
+  header h1 img { display: block; height: 64px; padding: 4px; border-radius: 8px; background: #ffffff; }
   .stats { display: flex; gap: 18px; margin-left: auto; align-items: center; flex-wrap: wrap; }
   .stat { font-size: 13px; color: var(--muted); }
   .stat b { color: var(--ink); font-size: 16px; }
@@ -83,7 +86,7 @@
 </head>
 <body>
 <header>
-  <h1>Play with LooNN</h1>
+  <h1>Play with <img src="logo.png" alt="LooNN"></h1>
   <div class="stats">
     <span class="stat">Score <b id="score">–</b></span>
     <span class="stat">Predicted final <b id="predicted">–</b></span>

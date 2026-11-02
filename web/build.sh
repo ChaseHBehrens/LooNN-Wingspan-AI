@@ -12,6 +12,6 @@ cargo build -p loonn-web --target wasm32-unknown-unknown --profile web
 rm -rf site
 mkdir -p site
 wasm-bindgen --target web --no-typescript --out-dir site/pkg target/wasm32-unknown-unknown/web/loonn_web.wasm
-cp play/index.html site/index.html
+cp play/index.html play/logo.png play/favicon.png site/
 cp web/worker.js web/model.bin site/
 echo "Built site/ ($(du -sh site | cut -f1))"

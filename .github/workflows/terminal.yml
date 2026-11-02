@@ -1,7 +1,7 @@
 # Builds the terminal version (src/bin/terminal.rs) for Linux, macOS and Windows
-# when a version tag (v*) is pushed, and attaches the downloads to that tag's
-# release, creating the release if needed. Run by hand, it keeps the builds as
-# workflow artifacts instead.
+# when a version tag (v*) is pushed, and attaches the binaries to that tag's
+# release once every build has finished, creating the release if needed. Run by
+# hand, it keeps the builds as workflow artifacts instead.
 name: Build terminal version
 
 on:
@@ -13,20 +13,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
-
   build:
-    needs: release
-    # Still runs when started by hand, which skips the release job
-    if: ${{ !failure() && !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -58,30 +45,38 @@ jobs:
       - name: Build
         run: cargo build --release --locked --no-default-features --features terminal --bin terminal --target ${{ matrix.target }}
 
-      - name: Package
-        id: package
+      - name: Name the binary
+        id: binary
         run: |
-          dir=loonn-terminal-${{ matrix.name }}
-          mkdir "$dir"
+          file=loonn-terminal-${{ matrix.name }}
           if [[ "${{ matrix.target }}" == *windows* ]]; then
-            cp target/${{ matrix.target }}/release/terminal.exe "$dir/loonn-terminal.exe"
-            7z a "$dir.zip" "$dir" > /dev/null
-            echo "file=$dir.zip" >> "$GITHUB_OUTPUT"
+            file=$file.exe
+            cp target/${{ matrix.target }}/release/terminal.exe "$file"
           else
-            cp target/${{ matrix.target }}/release/terminal "$dir/loonn-terminal"
-            tar -czf "$dir.tar.gz" "$dir"
-            echo "file=$dir.tar.gz" >> "$GITHUB_OUTPUT"
+            cp target/${{ matrix.target }}/release/terminal "$file"
           fi
-
-      - name: Attach to the release
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.package.outputs.file }}" --clobber
+          echo "file=$file" >> "$GITHUB_OUTPUT"
 
       - name: Keep as a workflow artifact
-        if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
           name: loonn-terminal-${{ matrix.name }}
-          path: ${{ steps.package.outputs.file }}
+          path: ${{ steps.binary.outputs.file }}
+
+  # Publishes only after every build has succeeded, so no release is missing a binary
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber

@@ -20,6 +20,7 @@ use loonn::session::{ catalog, Session };
 const PORT: u16 = 8766;
 /// Read on every request so the page can be edited without rebuilding
 const PAGE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/play/index.html");
+const IMAGES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/play");
 
 enum Command {
     Answer(u64, Vec<String>),
@@ -81,6 +82,16 @@ fn handle(stream: TcpStream, state: &Mutex<String>, commands: &Mutex<Sender<Comm
     let mut body = vec![0; length];
     reader.read_exact(&mut body)?;
     let body = String::from_utf8_lossy(&body);
+
+    // Images aren't text, so they skip the responses below
+    if method == "GET" && matches!(path, "/logo.png" | "/favicon.png") && let Ok(image) = fs::read(format!("{IMAGES}{path}")) {
+        write!(
+            &stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+            image.len(),
+        )?;
+        return (&stream).write_all(&image);
+    }
 
     const JSON: &str = "application/json";
     let send = |command| { let _ = commands.lock().unwrap().send(command); };

@@ -1,3 +1,7 @@
+<p align="center">
+    <img width="320" alt="LooNN logo" src="play/logo.png" />
+</p>
+
 # Wingspan AI
 This project contains LooNN, a neural network based bot capable of playing the board game Wingspan.
 
@@ -21,6 +25,10 @@ endorsed by, or connected to Stonemaier Games, or any official creators or publi
 
 ### Play in the terminal
 Download the **[latest release](https://github.com/ChaseHBehrens/LooNN-Wingspan-AI/releases/latest)** for Linux, Windows, or macOS
+
+On Linux or macOS, make the download executable with `chmod +x loonn-terminal-*`
+
+On macOS, if it gets blocked, also run `xattr -d com.apple.quarantine loonn-terminal-*`
 
 <img 
     width="800" 
@@ -59,7 +67,12 @@ Its averages 68.6 points per game with a standard deviation of 10.8 points.
 For reference this about the same level as me, someone who has played a couple of games and is not particularly good. 
 While this network is not capable of superhuman performance, I am very happy with the results given the complexity of the game. 
 
-<img width="1600" height="800" alt="image" src="https://github.com/user-attachments/assets/96122aa1-c032-4ed9-9024-b65032ecc1fc" />
+<img 
+    width="1600" 
+    height="800" 
+    alt="image" 
+    src="https://github.com/user-attachments/assets/96122aa1-c032-4ed9-9024-b65032ecc1fc" 
+/>
 
 
 ## Limitations
