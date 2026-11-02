@@ -1,7 +1,9 @@
 <p align="center">
     <img width="320" alt="LooNN logo" src="logo.svg" />
 </p>
+
 ---
+
 This project contains LooNN, a neural network based bot capable of playing the board game Wingspan.
 
 > ⚠️ **Disclaimer:** This project is an unofficial and independent AI implementation that is not affiliated with, 
